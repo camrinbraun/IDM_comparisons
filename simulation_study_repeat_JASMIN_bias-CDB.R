@@ -131,6 +131,11 @@ library(fields)
 library(deldir)
 library(dplyr)
 
+## load original data from FaCeT project? default is FALSE
+if (!exists("get_data")) { get_data = FALSE }
+## use small spatial subset of the data? default is TRUE
+if (!exists("sp_subset")) { sp_subset = TRUE }
+
 
 # PRE-REQS --------------------------------------------------------------
 
@@ -172,32 +177,62 @@ stk_structured_data
 
 ## cols needed are x (lon), y (lat), presence (0 or 1), ...
 
-## observer data "enhanced" with env covariates, incl all data that passed QC
-data_obs <- data.table::fread('../NASA-FaCeT/data/enhance/observer-monthly/observer-enhanced_allAbs.csv')
-data_obs <- data_obs %>% filter(SpeciesCode == 'bsh') # results in approx 22k sets, 7300 have presence
-data_obs %>% group_by(pres) %>% summarise(n=n())
+if (get_data){
+  ## observer data "enhanced" with env covariates, incl all data that passed QC
+  data_obs <- data.table::fread('../NASA-FaCeT/data/enhance/observer-monthly/observer-enhanced_allAbs.csv')
+  data_obs <- data_obs %>% filter(SpeciesCode == 'bsh') # results in approx 22k sets, 7300 have presence
+  data_obs %>% group_by(pres) %>% summarise(n=n())
+  data.table::fwrite(data_obs, '~/Google Drive/Shared drives/MPG_WHOI/data/bsh_inla/bsh_observer.csv')
+  
+  ## mark-recapture data "enhanced" with env covariates, incl all data that passed QC
+  data_marker <- data.table::fread('../NASA-FaCeT/data/enhance/iccat-monthly/iccat-enhanced.csv')
+  data_marker <- data_marker %>% filter(SpeciesCode == 'BSH' & pres == 1) # approx 25k combined release/recoveries
+  data_marker %>% group_by(ObsType) %>% summarise(n=n())
+  data.table::fwrite(data_marker, '~/Google Drive/Shared drives/MPG_WHOI/data/bsh_inla/bsh_marker.csv')
+  
+  ## electronic data "enhanced" with env covariates, incl all data that passed QC. 
+  ## spot data has been fit with movement model (foieGras) and standardized to daily locations (with error from model)
+  data_spot <- data.table::fread('../NASA-FaCeT/data/enhance/etag/enhanced/etag-enhanced-bg_sat_extent2.csv')
+  data_spot <- data_spot %>% filter(pres == 1) # 
+  data_spot$tag_type <- 'spot'
+  #data_spot %>% group_by(instrument_name) %>% summarise(n=n())
+  
+  ## psat data has been fit with movement model (GPE3) and standardized to daily locations (with error from model)
+  data_psat <- data.table::fread('../NASA-FaCeT/data/enhance/etag/enhanced/etag-enhanced-bg_psat_extent2.csv')
+  data_psat <- data_psat %>% filter(pres == 1) # 
+  data_psat$tag_type <- 'psat'
+  #data_psat %>% group_by(instrument_name) %>% summarise(n=n())
+  ## combine etag data
+  data_etag <- rbind(data_spot, data_psat)
+  rm(data_psat); rm(data_spot)
+  data.table::fwrite(data_etag, '~/Google Drive/Shared drives/MPG_WHOI/data/bsh_inla/bsh_etag.csv')
+} else{
+  
+  data_observer <- data.table::fread('~/Google Drive/Shared drives/MPG_WHOI/data/bsh_inla/bsh_observer.csv')
+  data_marker <- data.table::fread('~/Google Drive/Shared drives/MPG_WHOI/data/bsh_inla/bsh_marker.csv')
+  data_etag <- data.table::fread('~/Google Drive/Shared drives/MPG_WHOI/data/bsh_inla/bsh_etag.csv')
+  
+}
 
-## mark-recapture data "enhanced" with env covariates, incl all data that passed QC
-data_marker <- data.table::fread('../NASA-FaCeT/data/enhance/iccat-monthly/iccat-enhanced.csv')
-data_marker <- data_marker %>% filter(SpeciesCode == 'BSH' & pres == 1) # approx 25k combined release/recoveries
-data_marker %>% group_by(ObsType) %>% summarise(n=n())
-
-## electronic data "enhanced" with env covariates, incl all data that passed QC. 
-## spot data has been fit with movement model (foieGras) and standardized to daily locations (with error from model)
-data_spot <- data.table::fread('../NASA-FaCeT/data/enhance/etag/enhanced/etag-enhanced-bg_sat_extent2.csv')
-data_spot <- data_spot %>% filter(pres == 1) # 
-data_spot$tag_type <- 'spot'
-#data_spot %>% group_by(instrument_name) %>% summarise(n=n())
-
-## psat data has been fit with movement model (GPE3) and standardized to daily locations (with error from model)
-data_psat <- data.table::fread('../NASA-FaCeT/data/enhance/etag/enhanced/etag-enhanced-bg_psat_extent2.csv')
-data_psat <- data_psat %>% filter(pres == 1) # 
-data_psat$tag_type <- 'psat'
-#data_psat %>% group_by(instrument_name) %>% summarise(n=n())
-## combine etag data
-data_etag <- rbind(data_spot, data_psat)
-rm(data_psat); rm(data_spot)
-
+if (sp_subset){
+  
+  print(paste("**---- Using small subset of study domain to speed things up ----**"))
+  
+  xl <- c(-70, -65)
+  yl <- c(35, 40)
+  
+  data_observer <- data_observer %>% filter(lon > xl[1] & lon < xl[2] & lat > yl[1] & lat < yl[2])
+  data_marker <- data_marker %>% filter(lon > xl[1] & lon < xl[2] & lat > yl[1] & lat < yl[2])
+  data_etag <- data_etag %>% filter(lon > xl[1] & lon < xl[2] & lat > yl[1] & lat < yl[2])
+  
+} else{
+  
+  print(paste("**---- Using full N Atlantic study domain ----**"))
+  
+  xl <- c(-100, -5)
+  yl <- c(10, 55)
+  
+}
 
 ## these datasets each need a "bias" col and whatever env covars will be used
 
@@ -227,13 +262,12 @@ rm(data_psat); rm(data_spot)
 
 ## example env covariate grid that those variables are extracted from and that we will ultimately predict to
 ## uses native GLORYS grid and resolution
-mld <- raster::rotate(raster::stack('/Volumes/Elements/roms_nwa/mld.GLORYS.NWAtl.mon.mean.1993-2018.nc'))
+#mld <- raster::rotate(raster::stack('/Volumes/Elements/roms_nwa/mld.GLORYS.NWAtl.mon.mean.1993-2018.nc'))
 #mld <- mld[[1]]
 #env_coords <- xyFromCell(mld, 1:ncell(mld))
 
 # construct the mesh ##
 proj <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
-xl <- c(-100, -5); yl <- c(10, 55)
 atl <- rgdal::readOGR('../NASA-FaCeT/data/shapefiles/atlantic.shp')
 atl <- raster::crop(atl, extent(xl[1], xl[2], yl[1], yl[2]))
 
@@ -242,8 +276,6 @@ bdry$loc <- inla.mesh.map(bdry$loc)
 coarse_mesh <- inla.mesh.2d(boundary = bdry, max.edge=c(2,4), 
                       offset = c(0.5, 1),
                       cutoff = 0.3)
-#plot(coarse_mesh)
-
 coarse_mesh$crs <- proj
 
 #mesh_plot <- ggplot() +
