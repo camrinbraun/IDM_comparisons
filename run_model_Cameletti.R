@@ -26,18 +26,20 @@ if (!exists("do.remote")) { do.remote = FALSE }
 ## Do you want to print (to png/pdf files)?
 if (!exists("do.print")) { do.print = FALSE }
 ## Path for the Covariates directory
-if (!exists("pm10.path")) { pm10.path = "~/Google Drive/Shared drives/MPG_WHOI/data/bsh_inla/Cameletti2012/Covariates/" }
+if (!exists("pm10.path")) { pm10.path = "~/Google Drive/Shared drives/MPG_WHOI/data/bsh_inla/Cameletti2012/" }
 
 library(INLA)
 library(fields)
 library(abind)
 library(lattice)
 
+setwd(pm10.path)
+
 graphics.off()
 if (force.rerun || !exists("result")) {
 
     ##--- Source the function for selecting the covariates for a given day
-    source(paste(pm10.path,"Covariates_selector.R",sep=""))
+    source(paste(pm10.path,"Covariates/Covariates_selector.R",sep=""))
 
     ## ################################
     ## Load the data
@@ -340,14 +342,14 @@ approx.hyperpar =
 print(approx.hyperpar)
 
 ##--- Load the covariate arrays (each array except for A is 56x72x182)
-load(paste(pm10.path,"Altitude_GRID.RData",sep="")) #A; AltitudeGRID
-load(paste(pm10.path,"WindSpeed_GRID.RData",sep="")) #WS; WindSpeedGRID
-load(paste(pm10.path,"HMix_GRID.RData",sep="")) #HMIX; HMixMaxGRID
-load(paste(pm10.path,"Emi_GRID.RData",sep="")) #EMI; EmiGRID
-load(paste(pm10.path,"Temp_GRID.RData",sep="")) #TEMP; Mean_Temp
-load(paste(pm10.path,"Prec_GRID.RData",sep="")) #PREC; Prec
+load(paste(pm10.path,"Covariates/Altitude_GRID.RData",sep="")) #A; AltitudeGRID
+load(paste(pm10.path,"Covariates/WindSpeed_GRID.RData",sep="")) #WS; WindSpeedGRID
+load(paste(pm10.path,"Covariates/HMix_GRID.RData",sep="")) #HMIX; HMixMaxGRID
+load(paste(pm10.path,"Covariates/Emi_GRID.RData",sep="")) #EMI; EmiGRID
+load(paste(pm10.path,"Covariates/Temp_GRID.RData",sep="")) #TEMP; Mean_Temp
+load(paste(pm10.path,"Covariates/Prec_GRID.RData",sep="")) #PREC; Prec
 ##--- Load the Piemonte grid c(309,529),c(4875,5159),dims=c(56,72)
-load(paste(pm10.path,"Piemonte_grid.RData",sep=""))
+load(paste(pm10.path,"Covariates/Piemonte_grid.RData",sep=""))
 
 ##--- Extract the covariate for day i_day (you get a 56X72 matrix)
 covariate_array_std =
@@ -443,6 +445,7 @@ ylim =
                                        "mean"], na.rm=TRUE)))
 xylim = range(c(xlim,ylim))
 
+par(mfrow=c(2,1))
 plot(Piemonte_data$logPM10,
      result$summary.linear.predictor[inla.stack.index(stack, "est")$data,
                                      "mean"],
