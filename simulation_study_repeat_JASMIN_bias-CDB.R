@@ -1,126 +1,5 @@
 ## from https://github.com/NERC-CEH/IDM_comparisons and Suhaimi et al 2021 
 
-
-# load libraries ####
-
-library(INLA)
-#INLA:::inla.dynload.workaround() 
-library(reshape2)
-library(deldir)
-library(rgeos)
-library(fields)
-library(RColorBrewer)
-#display.brewer.all(colorblindFriendly = TRUE)
-
-# GENERATE DATA FOR SIMS --------------------------------------------------------------
-## we have real data so dont need this but leaving here as a guide for data formats, etc
-
-## Set parameters
-
-#genData
-dim = c(100,100)   
-lambda = -3    
-env.beta = 1.2 
-plotdat = FALSE
-sigma2x = 1     # var in rLGCP
-kappa = 0.05    # =1/scale in rLGCP  [0.02, 0.1] good range
-
-#genStrataLam
-strata = 25
-rows = 5
-cols = 5
-plot = TRUE
-
-#addSpatialBias - detection
-# this is where we can control bias
-probs = rep(c(0.5, 0.3, 0.1, 0.05, 0.01),5) #default
-#probs = rep(c(0.2, 0.2, 0.2, 0.2, 0.2),5) # unbiased
-#probs = rep(c(0.5, 0.4, 0.1, 0.01, 0.001),5) # very biased
-
-#sampleStructured
-nsamp = 100  
-#nsamp = 50   #small
-#nsamp = 200  #large
-plotdat = TRUE
-qsize = 1          #~~~ neighborhood; buffer <- (qsize-1)/2
-
-#~~~ mesh
-mesh.edge = c(7, 14)   
-mesh.offset = c(2, 7)   
-
-#~~~ dimension
-resolution = c(5,5)
-
-
-##read seeds
-
-seed_all <- read.csv("seed_biased.csv")
-#seed_new <- 399
-
-# Generate data ##
-
-# change the seed for each run
-
-i <- as.numeric(commandArgs(trailingOnly = TRUE))[1]
-
-seed_new <- seed_all[i,2]
-
-print(seed_new)
-
-#start_time_ori <- Sys.time()
-
-start_time <- Sys.time()
-seed = seed_all[i]
-
-source("Functions to generate data and sample.R")
-g1 <- genDataFunctions(dim = dim,
-                       lambda = lambda,
-                       env.beta = env.beta,
-                       seed = seed_new,
-                       kappa = kappa,
-                       sigma2x = sigma2x,
-                       strata = strata,
-                       rows = rows,
-                       cols = cols,
-                       probs = probs,
-                       nsamp = nsamp,
-                       plot = F,
-                       plotdat = F,
-                       qsize = 1)
-
-structured_data <- g1$structured_data
-unstructured_data <- g1$unstructured_data
-biasfield <- g1$biasfield
-dat1 <- g1$dat1
-biascov <- g1$biascov
-strata1 <- g1$strata1
-
-print(seed_new)
-print(nrow(unstructured_data))
-
-
-#' Visualise thinned unstructured data
-#+ echo = FALSE
-#par(mfrow=c(1,1))
-image.plot(list(x=dat1$Lam$xcol, y=dat1$Lam$yrow, z=t(dat1$rf.s)),
-           main='Thinned unstructured data', asp=1,
-           col = hcl.colors(12, "RdBu", rev = TRUE))
-points(unstructured_data$x, unstructured_data$y, pch = 20)#note rescale again - plotting back on original
-
-#' Visualise structured data
-#+ echo = FALSE
-#par(mfrow=c(1,1))
-image.plot(list(x=dat1$Lam$xcol, y=dat1$Lam$yrow, z=t(dat1$rf.s)),
-           main='Structured data', asp=1,
-           col = hcl.colors(12, "RdBu", rev = TRUE))
-points(structured_data$x,structured_data$y, pch = 21, bg = structured_data$presence, col = "black")
-#par(xpd = TRUE)
-#legend(0,115,c("Absence", "Presence"), pch = 21, col = "black", pt.bg = c(0,1))
-
-ggplot() +
-  geom_raster(data = dat1$gridcov , aes(x = x, y = y, fill = sim1))# + 
-
-
 # PACKAGES --------------------------------------------------------------
 
 # packages
@@ -130,14 +9,21 @@ library(rgeos)
 library(fields)
 library(deldir)
 library(dplyr)
+library(RColorBrewer)
+library(data.table)
+library(raster)
 
 ## load original data from FaCeT project? default is FALSE
 if (!exists("get_data")) { get_data = FALSE }
+
 ## use small spatial subset of the data? default is TRUE
 if (!exists("sp_subset")) { sp_subset = TRUE }
 
+## want to simulate some data? this is from Suhaimi and is not tested but retained for posterity
+if (!exists("sim_data")) { sim_data = FALSE }
 
-# PRE-REQS --------------------------------------------------------------
+
+# PRE-REQS & NOTES --------------------------------------------------------------
 
 # observer binomial
 # everything else poisson
@@ -152,26 +38,135 @@ if (!exists("sp_subset")) { sp_subset = TRUE }
 
 
 ## something to do with the strata?
-biasfield
+#biasfield
 
 # x by y matrix of bias weightings (0 to 1, where 1 is most biased)
-biascov
+#biascov
 
 # mesh parameters
-mesh.edge
-mesh.offset
+#mesh.edge
+#mesh.offset
 
-dat1
+#dat1
 # dat1$gridcov = environmental covariate grid
 
 # inla "stk" is how data is prepped for inla. simply vectors of covariates (e.g. env, bias, etc) and the accompanying grid
 # plus some mesh-derived stuff. dont need any info on pres/abs or even location bc its PO
-stk_unstructured_data
+#stk_unstructured_data
 
 # structured data reqs info on pres/abs in addition to the above
-stk_structured_data
+#stk_structured_data
 
 
+# GENERATE DATA FOR SIMS --------------------------------------------------------------
+## we have real data so dont need this but leaving here as a guide for data formats, etc
+if (sim_data){
+  ## Set parameters
+  
+  #genData
+  dim = c(100,100)   
+  lambda = -3    
+  env.beta = 1.2 
+  plotdat = FALSE
+  sigma2x = 1     # var in rLGCP
+  kappa = 0.05    # =1/scale in rLGCP  [0.02, 0.1] good range
+  
+  #genStrataLam
+  strata = 25
+  rows = 5
+  cols = 5
+  plot = TRUE
+  
+  #addSpatialBias - detection
+  # this is where we can control bias
+  probs = rep(c(0.5, 0.3, 0.1, 0.05, 0.01),5) #default
+  #probs = rep(c(0.2, 0.2, 0.2, 0.2, 0.2),5) # unbiased
+  #probs = rep(c(0.5, 0.4, 0.1, 0.01, 0.001),5) # very biased
+  
+  #sampleStructured
+  nsamp = 100  
+  #nsamp = 50   #small
+  #nsamp = 200  #large
+  plotdat = TRUE
+  qsize = 1          #~~~ neighborhood; buffer <- (qsize-1)/2
+  
+  #~~~ mesh
+  mesh.edge = c(7, 14)   
+  mesh.offset = c(2, 7)   
+  
+  #~~~ dimension
+  resolution = c(5,5)
+  
+  
+  ##read seeds
+  
+  seed_all <- read.csv("seed_biased.csv")
+  #seed_new <- 399
+  
+  # Generate data ##
+  
+  # change the seed for each run
+  
+  i <- as.numeric(commandArgs(trailingOnly = TRUE))[1]
+  
+  seed_new <- seed_all[i,2]
+  
+  print(seed_new)
+  
+  #start_time_ori <- Sys.time()
+  
+  start_time <- Sys.time()
+  seed = seed_all[i]
+  
+  source("Functions to generate data and sample.R")
+  g1 <- genDataFunctions(dim = dim,
+                         lambda = lambda,
+                         env.beta = env.beta,
+                         seed = seed_new,
+                         kappa = kappa,
+                         sigma2x = sigma2x,
+                         strata = strata,
+                         rows = rows,
+                         cols = cols,
+                         probs = probs,
+                         nsamp = nsamp,
+                         plot = F,
+                         plotdat = F,
+                         qsize = 1)
+  
+  structured_data <- g1$structured_data
+  unstructured_data <- g1$unstructured_data
+  biasfield <- g1$biasfield
+  dat1 <- g1$dat1
+  biascov <- g1$biascov
+  strata1 <- g1$strata1
+  
+  print(seed_new)
+  print(nrow(unstructured_data))
+  
+  
+  #' Visualise thinned unstructured data
+  #+ echo = FALSE
+  #par(mfrow=c(1,1))
+  image.plot(list(x=dat1$Lam$xcol, y=dat1$Lam$yrow, z=t(dat1$rf.s)),
+             main='Thinned unstructured data', asp=1,
+             col = hcl.colors(12, "RdBu", rev = TRUE))
+  points(unstructured_data$x, unstructured_data$y, pch = 20)#note rescale again - plotting back on original
+  
+  #' Visualise structured data
+  #+ echo = FALSE
+  #par(mfrow=c(1,1))
+  image.plot(list(x=dat1$Lam$xcol, y=dat1$Lam$yrow, z=t(dat1$rf.s)),
+             main='Structured data', asp=1,
+             col = hcl.colors(12, "RdBu", rev = TRUE))
+  points(structured_data$x,structured_data$y, pch = 21, bg = structured_data$presence, col = "black")
+  #par(xpd = TRUE)
+  #legend(0,115,c("Absence", "Presence"), pch = 21, col = "black", pt.bg = c(0,1))
+  
+  ggplot() +
+    geom_raster(data = dat1$gridcov , aes(x = x, y = y, fill = sim1))# + 
+  
+}
 
 # LOAD REAL DATA --------------------------------------------------------------
 
@@ -243,6 +238,12 @@ if (sp_subset){
 ## NA values should have already been removed from all env covariates
 
 
+## do we need to standardize env? Cameletti did like:
+#mean_covariates = apply(data_observer %>% select(lon, lat, sst:bvfreq), 2, mean)
+#sd_covariates = apply(data_observer %>% select(lon, lat, sst:bvfreq), 2, sd)
+
+#data_observer_standardized <- scale(data_observer %>% select(lon, lat, sst:bvfreq),
+#                                    mean_covariates, sd_covariates)
 
 # BUILD BIAS FIELDS --------------------------------------------------------------
 
@@ -269,7 +270,7 @@ if (sp_subset){
 # construct the mesh ##
 proj <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
 atl <- rgdal::readOGR('../NASA-FaCeT/data/shapefiles/atlantic.shp')
-atl <- raster::crop(atl, extent(xl[1], xl[2], yl[1], yl[2]))
+atl <- raster::crop(atl, raster::extent(xl[1], xl[2], yl[1], yl[2]))
 
 bdry <- inla.sp2segment(atl)
 bdry$loc <- inla.mesh.map(bdry$loc)
@@ -285,20 +286,87 @@ coarse_mesh$crs <- proj
 #  theme(plot.title = element_text(hjust = 0.5))
 #mesh_plot
 
+
+# MAKE SPDE & MATRICES --------------------------------------------------------------
+
 # make SPDE 
 spde <- inla.spde2.matern(mesh = coarse_mesh, alpha = 2)
 
 # make A matrix
 data_marker_A <- inla.spde.make.A(mesh = coarse_mesh,
-                                      loc = as.matrix(data_marker[,c('lon','lat')]))
+                                  loc = as.matrix(data_marker[,c('lon','lat')])
+                                  #group=Piemonte_data$time, ## these temporal groupings are from Cameletti, not sure if we need them?
+                                  #n.group=n_days
+                                  )
 
-data_obs_A <- inla.spde.make.A(mesh = coarse_mesh,
-                                  loc = as.matrix(data_obs[,c('lon','lat')]))
+data_observer_A <- inla.spde.make.A(mesh = coarse_mesh,
+                                  loc = as.matrix(data_observer[,c('lon','lat')])
+                                  #group=Piemonte_data$time, ## these temporal groupings are from Cameletti, not sure if we need them?
+                                  #n.group=n_days
+                                  )
 
 data_etag_A <- inla.spde.make.A(mesh = coarse_mesh,
-                                  loc = as.matrix(data_etag[,c('lon','lat')]))
+                                loc = as.matrix(data_etag[,c('lon','lat')])
+                                #group=Piemonte_data$time, ## these temporal groupings are from Cameletti, not sure if we need them?
+                                #n.group=n_days
+                                )
+## ^^^ perhaps grouping above is way to account for individual in etag data?
 
-  
+
+# INLA STACK & FIT V1 - CAMELETTI --------------------------------------------------------------
+
+field.indices <- inla.spde.make.index("field",
+                                      n.spde=spde$n.spde
+                                      #n.group=n_days
+                                      )
+
+stack_marker <- inla.stack(data=list(pres = data_marker$pres),
+                             A = list(data_marker_A, 1),
+                             effects = list(c(field.indices,
+                                              list(Intercept=1)),
+                                            list(data_marker %>% select(sst))), ## grabs just sst for now
+                                            #list(data_observer %>% select(sst:bvfreq))), ## grabs all env covariates
+                             tag="marker")
+
+stack_observer <- inla.stack(data=list(pres = data_observer$pres),
+                             A = list(data_observer_A, 1),
+                             effects = list(c(field.indices,
+                                              list(Intercept=1)),
+                                            list(data_observer %>% select(lon, lat, sst))), ## grabs just sst for now
+                             #list(data_observer %>% select(sst:bvfreq))), ## grabs all env covariates
+                             tag="observer")
+
+stack_etag <- inla.stack(data=list(pres = data_etag$pres),
+                             A = list(data_etag_A, 1),
+                             effects = list(c(field.indices,
+                                              list(Intercept=1)),
+                                            list(data_etag %>% select(sst))), ## grabs just sst for now
+                             #list(data_observer %>% select(sst:bvfreq))), ## grabs all env covariates
+                             tag="etag")
+
+#stack = inla.stack(stack_marker, stack_observer, stack_etag)
+
+## skeptical of the UTMX + UTMY covars, aren't these projected coordinates in UTM? i believe so
+#formula <- (logPM10 ~ -1 + Intercept + A + UTMX + UTMY + WS + TEMP + HMIX + PREC + EMI + f(field, model=spde, group=field.group, control.group=list(model="ar1")))
+## mirroring formula for Cameletti but concerned about how to include spatial component
+formula <- (pres ~ -1 + Intercept + lon + lat + sst + f(field, model=spde, group=field.group, control.group=list(model="ar1")))
+
+
+t1 <- Sys.time()  
+result =
+  inla(formula,
+       data=inla.stack.data(stack_observer, spde=spde),
+       family="binomial",
+       control.predictor=list(A=inla.stack.A(stack_observer), compute=TRUE),
+       control.compute=list(cpo=FALSE),
+       control.inla = list(reordering = "metis"),
+       keep=FALSE, verbose=TRUE)
+t2 <- Sys.time()
+t2-t1
+
+
+# INLA STACK & FIT V2 - SUHAIMI --------------------------------------------------------------
+
 # integration stack for unstructured data ###
 #max_x <- max(env_coords[,1])
 max_x <- max(coarse_mesh$loc[,1])
@@ -340,7 +408,7 @@ imat <- Diagonal(nv, rep(1, nv))
 A.pp <- rbind(imat, data_marker_A)  # new A matrix for unstructured
   
 
-########
+#### CDB STOPPED HERE IN THIS SECTION
 
   #get covariate for integration points
   #refer plot 'covariate'
@@ -356,7 +424,7 @@ A.pp <- rbind(imat, data_marker_A)  # new A matrix for unstructured
                                                im(biascov)))]
   
   
-  # create data stacks ####
+  # create data stacks ##
   
   #unstructured data stack with integration points
   stk_unstructured_data <- inla.stack(
@@ -386,7 +454,7 @@ A.pp <- rbind(imat, data_marker_A)  # new A matrix for unstructured
   # combine stacks
   stk <- inla.stack(stk_unstructured_data, stk_structured_data)
   
-  # prediction stack ####
+  # prediction stack ###
   source("Create prediction stack for correlation model.R")
   
   join.stack <- create_prediction_stack_corr(data_stack = stk,
@@ -397,9 +465,7 @@ A.pp <- rbind(imat, data_marker_A)  # new A matrix for unstructured
                                              spde = spde)
   
   
-  ##############################
-  
-  # fit model ####
+  # fit model ###
   
   formulaC = y ~ -1 + interceptA + interceptB + env + bias +
     f(uns_field, model = spde, group = uns_field.group, control.group = list(model = 'exchangeable'))
@@ -417,8 +483,5 @@ A.pp <- rbind(imat, data_marker_A)  # new A matrix for unstructured
                    #cpo = TRUE,
                    waic = TRUE))
   
-  # no plotting for grouped model
+  #return(list(join.stack = join.stack, result = result))
   
-  return(list(join.stack = join.stack, result = result))
-  
-}
