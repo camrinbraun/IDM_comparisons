@@ -304,6 +304,7 @@ data_observer_A <- inla.spde.make.A(mesh = coarse_mesh,
                                   #group=Piemonte_data$time, ## these temporal groupings are from Cameletti, not sure if we need them?
                                   #n.group=n_days
                                   )
+## ^^^ do we need a temporal grouping as Cameletti did? I dont see why we would.
 
 data_etag_A <- inla.spde.make.A(mesh = coarse_mesh,
                                 loc = as.matrix(data_etag[,c('lon','lat')])
@@ -375,7 +376,7 @@ max_y <- max(coarse_mesh$loc[,2])
 
 loc.d <- t(matrix(c(0,0,max_x,0,max_x,max_y,0,max_y,0,0), 2))
 
-#make dual mesh - this one is time consuming!
+#make dual mesh
 dd <- deldir::deldir(coarse_mesh$loc[, 1], coarse_mesh$loc[, 2])
 tiles <- deldir::tile.list(dd)
 
@@ -455,8 +456,10 @@ A.pp <- rbind(imat, data_marker_A)  # new A matrix for unstructured
   stk <- inla.stack(stk_unstructured_data, stk_structured_data)
   
   # prediction stack ###
+  ## CDB: this adds a prediction stack to the input stack to INLA. 
+  ## I dont understand how to do this or why its needed?
+  ## Cameletti has this too...main diff is Suhaimi just wrapped theirs in this custom function
   source("Create prediction stack for correlation model.R")
-  
   join.stack <- create_prediction_stack_corr(data_stack = stk,
                                              resolution = resolution,
                                              biasfield = biasfield,
@@ -466,7 +469,6 @@ A.pp <- rbind(imat, data_marker_A)  # new A matrix for unstructured
   
   
   # fit model ###
-  
   formulaC = y ~ -1 + interceptA + interceptB + env + bias +
     f(uns_field, model = spde, group = uns_field.group, control.group = list(model = 'exchangeable'))
   
