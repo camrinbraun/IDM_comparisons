@@ -248,12 +248,28 @@ if (sp_subset){
 # BUILD BIAS FIELDS --------------------------------------------------------------
 
 ## observer will be distance from bathy contour (i.e. representing shelf break as focal point of effort)
+bathy <- raster::raster('~/Google Drive/Shared drives/MPG_WHOI/env_data/bathy/global_bathy_0.01.nc')
+bathy <- raster::rotate(bathy)
+bathy <- raster::crop(bathy, raster::extent(xl[1], xl[2], yl[1], yl[2]))
+c200 <- rasterToContour(bathy, levels=-200)
+proj4string(c200) <- proj4string(bathy)
+r1 <- raster(raster::extent(xl[1], xl[2], yl[1], yl[2]), resolution=c(.05))
+dd <- gDistance(c200, as(r1,"SpatialPoints"), byid=T)
+r1[] = apply(dd, 1, min)
+r1_scaled <- (r1 / cellStats(r1, max))*-1 + 1
+r1_scaled <- raster::resample(r1_scaled, bathy)
+r1_scaled <- raster::mask(r1_scaled, bathy)
+r1_binary <- raster::reclassify(r1_scaled, c(c(0, 0.9, 0), c(0.9, 1, 1)))
+r1_scaled_0.9 <- raster::reclassify(r1_scaled, c(0, 0.9, NA))
+r.min = cellStats(r1_scaled_0.9, "min")
+r.max = cellStats(r1_scaled_0.9, "max")
+r1_scaled_0.9 <- ((r1_scaled_0.9 - r.min) / (r.max - r.min))
+r1_scaled_0.9 <- raster::mask(raster::reclassify(r1_scaled_0.9, c(NA, NA, 0)), r1_binary)
+plot(r1_scaled_0.9)
 
+## marker tag will be as above but adding distance from shore to capture recreational fishery spatial bias? or do we need this?
 
-## marker tag will be as above but adding distance from shore to capture recreational fishery spatial bias
-
-
-## etag will be daily distance from previous location
+## etag will be daily distance from previous location? or do we need this?
 
 
 # BUILD MESH --------------------------------------------------------------
