@@ -236,7 +236,43 @@ if (sp_subset){
 
 # CHECK ENV COVARIATES (COLLINEARITY, ETC) --------------------------------------------------------------
 ## NA values should have already been removed from all env covariates
+# MCA: The issue of collinearity doesn't seem to come up in the lit on iSDMs but given that coefficient estimation
+# is done with joint likelihood even in the 'correlative' model structure we are using, I believe we need to 
+# check for collinearity in each dataset used in the model. My thought here is that if collinearity is present 
+# but not addressed in a given dataset, then the resulting coefficient likelihood from that submodel will skew 
+# the overall joint likelihood estimate across submodels. Below, I provide a function I wrote for quickly 
+# identifying collinear pairs of covariates in a provided dataset. This is designed to identify those pairs with 
+# |r| > 0.7 (as recommended by Dormann et al. 2013 Ecography) without having to stare at a bunch of plots or match
+# rows to columns visually in a large X by X matrix while remembering to ignore the diagonals and duplication across
+# the upper or lower triangles of the correlation matrix.
 
+# input example:   collinearity(covariates = data_observer[ , c("sst","ssh","chl","bathy")]) # just call covariates by their col names and the function does the rest
+collinearity <- function(covariates) {
+  ## function written by MCA
+  
+  ## if NA values present, can give spurious results
+  if (nrow(na.omit(covariates)) < nrow(covariates)){
+    warning('NA values present in covariates. Using na.omit() to remove them.')
+    print(paste0('Input covariates contained ', nrow(covariates), ' rows of data.'))
+    covariates <- na.omit(covariates)
+    print(paste0('Output covariates, with NA removed, contained ', nrow(covariates), ' rows of data.'))
+  }
+  
+  correlations <- cor(covariates)
+  dimlength <- nrow(covariates)
+  diags <- seq(1, dimlength ^ 2, by = (dimlength + 1))
+  colinears <- which(abs(correlations) > 0.7 & upper.tri(correlations, diag = FALSE) == TRUE)
+  
+  if (length(colinears) != 0){
+    for (i in 1:length(colinears)){
+      ind <- which(correlations == correlations[colinears[i]] & upper.tri(correlations, diag = FALSE) == TRUE, arr.ind = TRUE)
+      print(paste(rownames(correlations)[ind[1]], colnames(correlations)[ind[2]], sep = ", "))
+    }
+  } else {print("No pairwise comparisons with |r| > 0.70")}
+}
+
+data_observer <- na.omit(data_observer %>% select(sst:bvfreq))
+collinearity(data_observer %>% select(sst:bvfreq))
 
 ## do we need to standardize env? Cameletti did like:
 #mean_covariates = apply(data_observer %>% select(lon, lat, sst:bvfreq), 2, mean)
