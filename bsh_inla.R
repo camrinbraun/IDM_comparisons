@@ -665,7 +665,7 @@ if (run_bsh){
   ## check f() and how "uns_field" object needs to be structured
   
   formula = pres ~ -1 + 
-    interceptA + interceptB + interceptC + ## what intercepts do we need?
+    interceptA + interceptB + interceptC + ## intercepts for each of the three datasets
     bias + ## how to incorporate multiple bias fields?
     sst + bathy + ## as example env covariates to start with
     f(uns_field, model = spde, group = field.group, control.group = list(model = 'exchangeable'))
@@ -674,15 +674,15 @@ if (run_bsh){
   ## fit INLA
   ## order in our data stack will be observer (binomial), marker (poisson), etag (poisson)
   result <- inla(formula, 
-                 family = c("binomial", "poisson", "binomial"),
-                 data = inla.stack.data(join.stack),
-                 control.predictor = list(A = inla.stack.A(join.stack),
+                 family = c("binomial", "poisson", "poisson"),
+                 data = inla.stack.data(stk),
+                 control.predictor = list(A = inla.stack.A(stk),
                                           compute = TRUE),
                  control.family = list(list(link = "cloglog"),
                                        list(link = "log"),
                                        list(link = "log")),
-                 E = inla.stack.data(join.stack)$e, ## this applies only to PO data, see ?inla argument "E"
-                 Ntrials = inla.stack.data(join.stack)$Ntrials,
+                 E = inla.stack.data(stk)$e, ## this applies only to PO data, see ?inla argument "E"
+                 Ntrials = inla.stack.data(stk)$Ntrials,
                  control.compute = list(#dic = TRUE, 
                    #cpo = TRUE,
                    waic = TRUE))
