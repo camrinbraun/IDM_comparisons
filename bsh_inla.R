@@ -332,6 +332,7 @@ if (build_bias){
     return(L)
   }
   source('../HMMoce/R/repmat.r'); source('../HMMoce/R/meshgrid.r')
+  source('../HMMoce/R/setup.locs.grid.r')
   
   bathy <- raster::raster('~/Google Drive/Shared drives/MPG_WHOI/env_data/bathy/global_bathy_0.01.nc')
   bathy <- raster::rotate(bathy)
@@ -385,25 +386,32 @@ if (build_bias){
     }
   }
   plot(all_etag_error)
+  raster::writeRaster(all_etag_error, '~/Google Drive/Shared drives/MPG_WHOI/data/bsh_inla/etag_bias_FULLres.grd')
   
   bathy_resamp <- raster::resample(bathy, all_etag_error)
   error_try <- raster::mask(all_etag_error, bathy_resamp)
   error_try <- raster::resample(error_try, r_bias)
-  error_try <- raster::reclassify(error_try, c(c(0, 0, NA)))
+  #error_try <- raster::reclassify(error_try, c(c(0, 0, NA)))
+  error_try <- error_try / raster::cellStats(error_try, 'max')
   
-  pdf('etag_bias.pdf', height=10, width=12)
-  par(mfrow=c(2,1))
-  #plot(raster::mask(all_etag_error, bathy_resamp))
-  plot(error_try / raster::cellStats(error_try, 'max'), main='sum across normalized UDs')
-  world(add=T)
-  #points(data_etag_mod$lon, data_etag_mod$lat)
-  r_bias <- raster(xmn=xl[1], ymn=yl[1], xmx=xl[2], ymx=yl[2], res=.5)
-  etag_bias_pts <- raster::rasterize(cbind(data_etag_mod$lon, data_etag_mod$lat), r_bias, fun='count')
-  plot(etag_bias_pts / raster::cellStats(etag_bias_pts, 'max'), main='rasterize summary of locations (count)'); world(add=T)
-  dev.off()
+  if (make_plot){
+    #pdf('etag_bias.pdf', height=10, width=12)
+    par(mfrow=c(2,1))
+    #plot(raster::mask(all_etag_error, bathy_resamp))
+    plot(error_try / raster::cellStats(error_try, 'max'), main='sum across normalized UDs')
+    world(add=T)
+    #points(data_etag_mod$lon, data_etag_mod$lat)
+    r_bias <- raster(xmn=xl[1], ymn=yl[1], xmx=xl[2], ymx=yl[2], res=.5)
+    etag_bias_pts <- raster::rasterize(cbind(data_etag_mod$lon, data_etag_mod$lat), r_bias, fun='count')
+    plot(etag_bias_pts / raster::cellStats(etag_bias_pts, 'max'), main='rasterize summary of locations (count)'); world(add=T)
+    #dev.off()
+  }
   
-  raster::writeRaster(etag_bias, '~/Google Drive/Shared drives/MPG_WHOI/data/bsh_inla/etag_bias.grd')
-  
+  raster::writeRaster(error_try, '~/Google Drive/Shared drives/MPG_WHOI/data/bsh_inla/etag_bias.grd')
+  ## housekeeping
+  if (clean){
+    rm(bathy_resamp); rm(error_try); rm(all_etag_error); rm(fList); rm(etag_error); rm(locs.grid); rm(data_etag_mod); gc()
+  }
 } else{
   etag_bias <- raster::raster('~/Google Drive/Shared drives/MPG_WHOI/data/bsh_inla/etag_bias.grd')
   if (make_plot) plot(etag_bias, main='etag bias'); world(add=T)
@@ -427,12 +435,6 @@ coarse_mesh <- inla.mesh.2d(boundary = bdry, max.edge=c(2,4),
 coarse_mesh$crs <- proj
 
 if (make_plot){
-  #mesh_plot <- ggplot() +
-  #  gg(coarse_mesh) +
-  #  ggtitle('Plot of mesh') +
-  #  theme_bw() +
-  #  theme(plot.title = element_text(hjust = 0.5))
-  #mesh_plot
   plot(coarse_mesh)
   world(add=T)
 }
@@ -456,6 +458,7 @@ data_etag_A <- inla.spde.make.A(mesh = coarse_mesh,
                                 )
 ## ^^^ perhaps grouping argument above is way to account for individual in etag data?
 
+
 # INLA STACK & FIT - BSH --------------------------------------------------------------
 ## we integrate aspects of Suhaimi and Cameletti scripts for the BSH use case
 
@@ -473,8 +476,10 @@ if (run_bsh){
   stack_observer <- inla.stack(data=list(pres = data_observer$pres),
                                A = list(data_observer_A, 1),
                                effects = list(c(field.indices,
-                                                list(Intercept=1)),
-                                              list(data_marker %>% select(sst, bathy))), ## grabs just sst and bathy for now
+                                                list(Intercept=1),
+                                                list(data.frame(uns_field = 1:spde$n.spde),
+                                                     field.group = rep(1, spde$n.spde)),
+                                              list(data_marker %>% select(sst, bathy)))), ## grabs just sst and bathy for now
                                #list(data_observer %>% select(sst:bvfreq))), ## grabs all env covariates
                                tag="observer")
   
@@ -482,8 +487,10 @@ if (run_bsh){
   stack_marker <- inla.stack(data=list(pres = data_marker$pres),
                              A = list(data_marker_A, 1),
                              effects = list(c(field.indices,
-                                              list(Intercept=1)),
-                                            list(data_marker %>% select(sst, bathy))), ## grabs just sst and bathy for now
+                                              list(Intercept=1),
+                                              list(data.frame(uns_field = 1:spde$n.spde),
+                                                   field.group = rep(2, spde$n.spde)),  
+                                              list(data_marker %>% select(sst, bathy)))), ## grabs just sst and bathy for now
                              #list(data_observer %>% select(sst:bvfreq))), ## grabs all env covariates
                              tag="marker")
   
@@ -491,8 +498,10 @@ if (run_bsh){
   stack_etag <- inla.stack(data=list(pres = data_etag$pres),
                            A = list(data_etag_A, 1),
                            effects = list(c(field.indices,
-                                            list(Intercept=1)),
-                                          list(data_marker %>% select(sst, bathy))), ## grabs just sst and bathy for now
+                                            list(Intercept=1),
+                                            list(data.frame(uns_field = 1:spde$n.spde),
+                                                 field.group = rep(3, spde$n.spde)),  
+                                            list(data_marker %>% select(sst, bathy)))), ## grabs just sst and bathy for now
                            #list(data_observer %>% select(sst:bvfreq))), ## grabs all env covariates
                            tag="etag")
   
@@ -516,7 +525,7 @@ if (run_bsh){
     intercept + interceptB + ## what intercepts do we need?
     bias + ## how to incorporate multiple bias fields?
     sst + bathy + ## as example env covariates to start with
-    f(uns_field, model = spde, group = uns_field.group, control.group = list(model = 'exchangeable'))
+    f(uns_field, model = spde, group = field.group, control.group = list(model = 'exchangeable'))
   
   #****************
   ## fit INLA
