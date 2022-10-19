@@ -473,18 +473,25 @@ if (run_bsh){
   ## QUESTIONS:
   ## probably can add bias fields to the individual data stacks?
   
-  stack_observer <- inla.stack(data=list(pres = data_observer$pres),
+  #change data to include 0s for nodes and 1s for presences. believe this is only necessary for "unstructured" data types (i.e. PO)
+  nv <- coarse_mesh$n
+  marker.pp <- rep(0:1, c(nv, nrow(data_marker))) ## corresponds to y.pp in Suhaimi "unstructured" example
+  etag.pp <- rep(0:1, c(nv, nrow(data_etag))) ## corresponds to y.pp in Suhaimi "unstructured" example
+  
+  
+  stack_observer <- inla.stack(data=list(pres = cbind(data_observer$pres, NA, NA),
+                                         Ntrials = rep(1, nrow(data_observer))), ## still not clear what exactly Ntrials is but it seems important in "structured" data types (i.e. PA)
                                A = list(data_observer_A, 1),
                                effects = list(c(field.indices,
                                                 list(Intercept=1),
                                                 list(data.frame(uns_field = 1:spde$n.spde),
                                                      field.group = rep(1, spde$n.spde)),
-                                              list(data_marker %>% select(sst, bathy)))), ## grabs just sst and bathy for now
+                                                list(data_marker %>% select(sst, bathy)))), ## grabs just sst and bathy for now
                                #list(data_observer %>% select(sst:bvfreq))), ## grabs all env covariates
                                tag="observer")
   
   
-  stack_marker <- inla.stack(data=list(pres = data_marker$pres),
+  stack_marker <- inla.stack(data=list(pres = cbind(NA, data_marker$pres, NA)),
                              A = list(data_marker_A, 1),
                              effects = list(c(field.indices,
                                               list(Intercept=1),
@@ -495,7 +502,7 @@ if (run_bsh){
                              tag="marker")
   
   
-  stack_etag <- inla.stack(data=list(pres = data_etag$pres),
+  stack_etag <- inla.stack(data=list(pres = cbind(NA, NA, data_etag$pres)),
                            A = list(data_etag_A, 1),
                            effects = list(c(field.indices,
                                             list(Intercept=1),
