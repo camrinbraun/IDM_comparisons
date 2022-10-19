@@ -470,3 +470,6 @@ points(exp(Piemonte_data_validation$logPM10),
                                        "mean"]),
        col="red")
 lines(exp(xylim),exp(xylim),col="black")
+
+
+save.image(paste0(pm10.path, 'run_cameletti_model.rda'))
