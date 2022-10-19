@@ -444,7 +444,7 @@ if (make_plot){
 # make SPDE 
 spde <- inla.spde2.matern(mesh = coarse_mesh, alpha = 2)
 
-# make A matrix
+# Make observation structure for estimation data
 data_marker_A <- inla.spde.make.A(mesh = coarse_mesh,
                                   loc = as.matrix(data_marker[,c('lon','lat')]))
 
@@ -472,46 +472,182 @@ if (run_bsh){
   
   ## QUESTIONS:
   ## probably can add bias fields to the individual data stacks?
+  ## do we need a "validation" and/or "prediction" stack? my guess is no to former and yes to latter. both Suhaimi and Cameletti use a prediction stack
+
+  stack_observer <- inla.stack(
+    data = list(pres = cbind(data_observer$pres, NA, NA),
+                Ntrials = rep(1, nrow(data_observer))), ## still not clear what exactly Ntrials is but it seems important in "structured" data types (i.e. PA)
+    effects = list(
+      list( ## element 1 of effects list contains intercept, env covars and bias covar (if any)
+        data.frame(
+          interceptA = rep(1, length(data_observer$pres)),
+          data_observer %>% dplyr::select(sst,bathy)
+          )
+        ),
+      list( ## element 2 of effects list contains "groupings" from Suhaimi. still unclear what they do except that field.group groups the data types. we call this one group #1
+        data.frame(
+          uns_field = 1:spde$n.spde ## 1:n integration points from the mesh?
+          ),
+        field.group = rep(1, spde$n.spde) ## a group number
+        )
+      ), ## close effects list
+    A = list(data_observer_A, 1),
+    tag = 'observer'
+  )
   
-  #change data to include 0s for nodes and 1s for presences. believe this is only necessary for "unstructured" data types (i.e. PO)
+  
+  # change data to include 0s for nodes and 1s for presences. 
+  # believe this is only necessary for "unstructured" data types (i.e. PO)
   nv <- coarse_mesh$n
   marker.pp <- rep(0:1, c(nv, nrow(data_marker))) ## corresponds to y.pp in Suhaimi "unstructured" example
   etag.pp <- rep(0:1, c(nv, nrow(data_etag))) ## corresponds to y.pp in Suhaimi "unstructured" example
   
+  stack_marker <- inla.stack(
+    data = list(pres = cbind(NA, marker.pp, NA),
+                e = xxx), ## still not clear what e is but see "E" argument as input to inla() and "e.pp" in Suhaimi code
+    effects = list(
+      list( ## element 1 of effects list contains intercept, env covars and bias covar (if any)
+        data.frame(
+          interceptB = rep(1, length(marker.pp)),
+          data_marker %>% dplyr::select(sst,bathy)
+          #bias = xxx ## only need this if estimating bias covar?
+        )
+      ),
+      list( ## element 2 of effects list contains "groupings" from Suhaimi. still unclear what they do except that field.group groups the data types. we call this one group #1
+        data.frame(
+          uns_field = 1:spde$n.spde ## 1:n integration points from the mesh?
+        ),
+        field.group = rep(2, spde$n.spde) ## a group number
+      )
+    ), ## close effects list
+    A = list(data_marker_A, 1),
+    tag = 'marker'
+  )
   
-  stack_observer <- inla.stack(data=list(pres = cbind(data_observer$pres, NA, NA),
-                                         Ntrials = rep(1, nrow(data_observer))), ## still not clear what exactly Ntrials is but it seems important in "structured" data types (i.e. PA)
-                               A = list(data_observer_A, 1),
-                               effects = list(c(field.indices,
-                                                list(Intercept=1),
-                                                list(data.frame(uns_field = 1:spde$n.spde),
-                                                     field.group = rep(1, spde$n.spde)),
-                                                list(data_marker %>% select(sst, bathy)))), ## grabs just sst and bathy for now
-                               #list(data_observer %>% select(sst:bvfreq))), ## grabs all env covariates
-                               tag="observer")
   
+  stack_etag <- inla.stack(
+    data = list(pres = cbind(NA, NA, etag.pp),
+                e = xxx), ## still not clear what e is but see "E" argument as input to inla() and "e.pp" in Suhaimi code
+    effects = list(
+      list( ## element 1 of effects list contains intercept, env covars and bias covar (if any)
+        data.frame(
+          interceptC = rep(1, length(etag.pp)),
+          data_etag %>% dplyr::select(sst,bathy)
+          #bias = xxx ## only need this if estimating bias covar?
+        )
+      ),
+      list( ## element 2 of effects list contains "groupings" from Suhaimi. still unclear what they do except that field.group groups the data types. we call this one group #1
+        data.frame(
+          uns_field = 1:spde$n.spde ## 1:n integration points from the mesh?
+        ),
+        field.group = rep(3, spde$n.spde) ## a group number
+      )
+    ), ## close effects list
+    A = list(data_etag_A, 1),
+    tag = 'etag'
+  )
   
-  stack_marker <- inla.stack(data=list(pres = cbind(NA, data_marker$pres, NA)),
-                             A = list(data_marker_A, 1),
-                             effects = list(c(field.indices,
-                                              list(Intercept=1),
-                                              list(data.frame(uns_field = 1:spde$n.spde),
-                                                   field.group = rep(2, spde$n.spde)),  
-                                              list(data_marker %>% select(sst, bathy)))), ## grabs just sst and bathy for now
-                             #list(data_observer %>% select(sst:bvfreq))), ## grabs all env covariates
-                             tag="marker")
+  ## combine the stacks
+  stk <- inla.stack(stack_observer, stack_marker, stack_etag)
   
-  
-  stack_etag <- inla.stack(data=list(pres = cbind(NA, NA, data_etag$pres)),
-                           A = list(data_etag_A, 1),
-                           effects = list(c(field.indices,
-                                            list(Intercept=1),
-                                            list(data.frame(uns_field = 1:spde$n.spde),
-                                                 field.group = rep(3, spde$n.spde)),  
-                                            list(data_marker %>% select(sst, bathy)))), ## grabs just sst and bathy for now
-                           #list(data_observer %>% select(sst:bvfreq))), ## grabs all env covariates
-                           tag="etag")
-  
+  ## create a prediction stack
+  if (build_pred){
+    stop('THIS NEEDS WORK, currently copied from Suhaimi and slightly modified')
+    
+    ## create an expand.grid() of desired output grid (e.g. coordinates for each cell)
+    pred.grid <- expand.grid(x=seq(resolution[1]/2,
+                                   max(biasfield$x),
+                                   resolution[1]), 
+                             y=seq(resolution[2]/2, 
+                                   max(biasfield$y),
+                                   resolution[2])) # make grid
+    
+    dim(pred.grid) 
+    
+    ## extract covariate values at these points
+    ## ***** this is the tricky part ****
+    
+    ## create A.pred matrix based on mesh and pred coordinates
+    A.pred <- inla.spde.make.A(mesh, loc=as.matrix(pred.grid[,1:2]))
+    
+    np = length(pred.grid[,1]) # number of points
+    ys <- cbind(rep(NA, nrow(pred.grid)), rep(NA, nrow(pred.grid))) ## fill pred "data" with NAs
+    
+    stack.pred_observer =
+      inla.stack(
+        data = list(
+          pres = ys
+          ),
+        effects = list(
+          list( ## element 1 of effects list contains intercept, env covars and bias covar (if any)
+            data.frame(
+              interceptA = rep(1, np), ## assuming these intercepts mirror the corresponding data-based stack
+              sst = xxx,
+              bathy = xxx
+            )
+          ),
+          list( ## element 2 of effects list contains "groupings" from Suhaimi. still unclear what they do except that field.group groups the data types. we call this one group #1
+            data.frame(
+              uns_field = 1:spde$n.spde ## 1:n integration points from the mesh?
+            ),
+            field.group = rep(1, spde$n.spde) ## a group number
+          )
+        ), ## close effects list
+        A = list(1, 1, A.pred), ## not sure why this structure
+        tag = 'pred.observer'
+      )
+    
+    stack.pred_marker =
+      inla.stack(
+        data = list(
+          pres = ys
+        ),
+        effects = list(
+          list( ## element 1 of effects list contains intercept, env covars and bias covar (if any)
+            data.frame(
+              interceptB = rep(1, np), ## assuming these intercepts mirror the corresponding data-based stack
+              sst = xxx,
+              bathy = xxx
+            )
+          ),
+          list( ## element 2 of effects list contains "groupings" from Suhaimi. still unclear what they do except that field.group groups the data types. we call this one group #1
+            data.frame(
+              uns_field = 1:spde$n.spde ## 1:n integration points from the mesh?
+            ),
+            field.group = rep(2, spde$n.spde) ## a group number
+          )
+        ), ## close effects list
+        A = list(1, 1, A.pred), ## not sure why this structure
+        tag = 'pred.marker'
+      )
+    
+    stack.pred_etag =
+      inla.stack(
+        data = list(
+          pres = ys
+        ),
+        effects = list(
+          list( ## element 1 of effects list contains intercept, env covars and bias covar (if any)
+            data.frame(
+              interceptC = rep(1, np), ## assuming these intercepts mirror the corresponding data-based stack
+              sst = xxx,
+              bathy = xxx
+            )
+          ),
+          list( ## element 2 of effects list contains "groupings" from Suhaimi. still unclear what they do except that field.group groups the data types. we call this one group #1
+            data.frame(
+              uns_field = 1:spde$n.spde ## 1:n integration points from the mesh?
+            ),
+            field.group = rep(3, spde$n.spde) ## a group number
+          )
+        ), ## close effects list
+        A = list(1, 1, A.pred), ## not sure why this structure
+        tag = 'pred.etag'
+      )
+    
+    stk <- inla.stack(stk, stack.pred_observer, stack.pred_marker, stack.pred_etag)
+    
+  }
   
   #****************
   ## specify model formulation
@@ -529,7 +665,7 @@ if (run_bsh){
   ## check f() and how "uns_field" object needs to be structured
   
   formula = pres ~ -1 + 
-    intercept + interceptB + ## what intercepts do we need?
+    interceptA + interceptB + interceptC + ## what intercepts do we need?
     bias + ## how to incorporate multiple bias fields?
     sst + bathy + ## as example env covariates to start with
     f(uns_field, model = spde, group = field.group, control.group = list(model = 'exchangeable'))
@@ -545,7 +681,7 @@ if (run_bsh){
                  control.family = list(list(link = "cloglog"),
                                        list(link = "log"),
                                        list(link = "log")),
-                 E = inla.stack.data(join.stack)$e,
+                 E = inla.stack.data(join.stack)$e, ## this applies only to PO data, see ?inla argument "E"
                  Ntrials = inla.stack.data(join.stack)$Ntrials,
                  control.compute = list(#dic = TRUE, 
                    #cpo = TRUE,
