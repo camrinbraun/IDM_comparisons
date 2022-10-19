@@ -26,6 +26,9 @@ if (!exists("clean")) { clean = TRUE}
 if (!exists("build_bias")) { build_bias = FALSE}
 ## make plots as the data loads and other intermediate outputs are generated?
 if (!exists("make_plot")) { make_plot = TRUE}
+if (!exists("build_pred")) { build_pred = FALSE}
+if (!exists("run_cameletti")) { run_cameletti = FALSE}
+if (!exists("run_suhaimi")) { run_suhaimi = FALSE}
 
 
 # GENERATE DATA FOR SIMS --------------------------------------------------------------
@@ -464,14 +467,13 @@ data_etag_A <- inla.spde.make.A(mesh = coarse_mesh,
 
 if (run_bsh){
   
-  stop('The blue shark INLA code will NOT run. It is currently copied from Suhaimi as a starting point.')
+  stop('The blue shark INLA code will NOT run. It is currently copied from Suhaimi and modified accordingly as a starting point.')
   
   #****************
   ## build INLA stacks
-  ## these are NOT ready, just a start
-  
+
   ## QUESTIONS:
-  ## probably can add bias fields to the individual data stacks?
+  ## probably can add bias FIELDS to the individual data stacks?
   ## do we need a "validation" and/or "prediction" stack? my guess is no to former and yes to latter. both Suhaimi and Cameletti use a prediction stack
 
   stack_observer <- inla.stack(
