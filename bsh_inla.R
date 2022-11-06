@@ -29,6 +29,7 @@ if (!exists("make_plot")) { make_plot = TRUE}
 if (!exists("build_pred")) { build_pred = FALSE}
 if (!exists("run_cameletti")) { run_cameletti = FALSE}
 if (!exists("run_suhaimi")) { run_suhaimi = FALSE}
+if (!exists("coarse_mesh")) { coarse_mesh = TRUE}
 
 
 # GENERATE DATA FOR SIMS --------------------------------------------------------------
@@ -75,8 +76,8 @@ if (sim_data){
   
   ##read seeds
   
-  seed_all <- read.csv("seed_biased.csv")
-  #seed_new <- 399
+  #seed_all <- read.csv("seed_biased.csv")
+  seed_new <- 399
   
   # Generate data ##
   
@@ -84,14 +85,14 @@ if (sim_data){
   
   i <- as.numeric(commandArgs(trailingOnly = TRUE))[1]
   
-  seed_new <- seed_all[i,2]
+  #seed_new <- seed_all[i,2]
   
   print(seed_new)
   
   #start_time_ori <- Sys.time()
   
   start_time <- Sys.time()
-  seed = seed_all[i]
+  seed = seed_new
   
   source("Functions to generate data and sample.R")
   g1 <- genDataFunctions(dim = dim,
@@ -432,34 +433,93 @@ atl <- raster::crop(atl, raster::extent(xl[1], xl[2], yl[1], yl[2]))
 
 bdry <- inla.sp2segment(atl)
 bdry$loc <- inla.mesh.map(bdry$loc)
-coarse_mesh <- inla.mesh.2d(boundary = bdry, max.edge=c(2,4), 
-                            offset = c(0.5, 1),
-                            cutoff = 0.3)
-coarse_mesh$crs <- proj
+if (coarse_mesh){
+  mesh <- inla.mesh.2d(boundary = bdry, max.edge=c(2,4), 
+                       offset = c(0.5, 1),
+                       cutoff = 0.3)
+  
+} else{
+  stop('Fine mesh has not been defined.')
+}
+
+mesh$crs <- proj
 
 if (make_plot){
-  plot(coarse_mesh)
+  plot(mesh)
   world(add=T)
 }
 
 # MAKE SPDE & MATRICES --------------------------------------------------------------
 
 # make SPDE 
-spde <- inla.spde2.matern(mesh = coarse_mesh, alpha = 2)
+spde <- inla.spde2.matern(mesh = mesh, alpha = 2)
 
 # Make observation structure for estimation data
-data_marker_A <- inla.spde.make.A(mesh = coarse_mesh,
-                                  loc = as.matrix(data_marker[,c('lon','lat')]))
+# Create A matrices (mapping between the mesh nodes and station locations) #
 
-data_observer_A <- inla.spde.make.A(mesh = coarse_mesh,
+# make A matrix for structured data
+data_observer_A <- inla.spde.make.A(mesh = mesh,
                                     loc = as.matrix(data_observer[,c('lon','lat')]))
 
-data_etag_A <- inla.spde.make.A(mesh = coarse_mesh,
+# make A matrices for unstructured data
+data_marker_A <- inla.spde.make.A(mesh = mesh,
+                                  loc = as.matrix(data_marker[,c('lon','lat')]))
+
+data_etag_A <- inla.spde.make.A(mesh = mesh,
                                 loc = as.matrix(data_etag[,c('lon','lat')])
                                 #group=Piemonte_data$time, ## these temporal groupings are from Cameletti, not sure if we need them?
                                 #n.group=n_days
                                 )
 ## ^^^ perhaps grouping argument above is way to account for individual in etag data?
+
+
+# create integration stack
+max_x <- max(mesh$loc[,1])
+max_y <- max(mesh$loc[,2])
+loc.d <- t(matrix(c(0, 0, max_x, 0, max_x, max_y, 0, max_y, 0, 0), 2))
+
+#make dual mesh
+dd <- deldir::deldir(mesh$loc[, 1], mesh$loc[, 2])
+tiles <- deldir::tile.list(dd)
+
+#make domain into spatial polygon
+domainSP <- SpatialPolygons(list(Polygons(
+  list(Polygon(loc.d)), '0')))
+
+#intersection between domain and dual mesh
+poly.gpc <- as(domainSP@polygons[[1]]@Polygons[[1]]@coords, "gpc.poly")
+
+# w now contains area of voronoi polygons
+w <- sapply(tiles, function(p) rgeos::area.poly(rgeos::intersect(as(cbind(p$x, p$y), "gpc.poly"), poly.gpc)))
+
+nv <- mesh$n
+n_marker <- nrow(data_marker)
+n_etag <- nrow(data_etag)
+
+# change data to include 0s for nodes and 1s for presences. 
+# only necessary for "unstructured" data types (i.e. PO)
+y.pp_marker <- rep(0:1, c(nv, n_marker)) ## corresponds to y.pp in Suhaimi "unstructured" example
+y.pp_etag <- rep(0:1, c(nv, n_etag)) ## corresponds to y.pp in Suhaimi "unstructured" example
+
+# add expectation vector (area for integration points/nodes and 0 for presences)
+e.pp_marker <- c(w, rep(0, n_marker))
+e.pp_etag <- c(w, rep(0, n_etag))
+
+#diagonal matrix for integration point A matrix
+imat <- Diagonal(nv, rep(1, nv))
+
+A.pp_marker <- rbind(imat, data_marker_A)
+A.pp_etag <- rbind(imat, data_etag_A)
+
+
+biascovariate_marker_re <- raster::extract(marker_bias, cbind(mesh$loc[,1], mesh$loc[,2]))
+
+mean_covariates = apply(Piemonte_data[,3:10],2,mean)
+sd_covariates = apply(Piemonte_data[,3:10],2,sd)
+
+Piemonte_data[,3:10] =
+  scale(Piemonte_data[,3:10],
+        mean_covariates, sd_covariates)
 
 
 # INLA STACK & FIT - BSH --------------------------------------------------------------
@@ -476,55 +536,19 @@ if (run_bsh){
   ## probably can add bias FIELDS to the individual data stacks?
   ## do we need a "validation" and/or "prediction" stack? my guess is no to former and yes to latter. both Suhaimi and Cameletti use a prediction stack
 
-  stack_observer <- inla.stack(
-    data = list(pres = cbind(data_observer$pres, NA, NA),
-                Ntrials = rep(1, nrow(data_observer))), ## still not clear what exactly Ntrials is but it seems important in "structured" data types (i.e. PA)
-    effects = list(
-      list( ## element 1 of effects list contains intercept, env covars and bias covar (if any)
-        data.frame(
-          interceptA = rep(1, length(data_observer$pres)),
-          data_observer %>% dplyr::select(sst,bathy)
-          )
-        ),
-      list( ## element 2 of effects list contains "groupings" from Suhaimi. still unclear what they do except that field.group groups the data types. we call this one group #1
-        data.frame(
-          uns_field = 1:spde$n.spde ## 1:n integration points from the mesh?
-          ),
-        field.group = rep(1, spde$n.spde) ## a group number
-        )
-      ), ## close effects list
-    A = list(data_observer_A, 1),
-    tag = 'observer'
-  )
-  
-  
-  # change data to include 0s for nodes and 1s for presences. 
-  # believe this is only necessary for "unstructured" data types (i.e. PO)
-  nv <- coarse_mesh$n
-  marker.pp <- rep(0:1, c(nv, nrow(data_marker))) ## corresponds to y.pp in Suhaimi "unstructured" example
-  etag.pp <- rep(0:1, c(nv, nrow(data_etag))) ## corresponds to y.pp in Suhaimi "unstructured" example
-  
   stack_marker <- inla.stack(
-    data = list(pres = cbind(NA, marker.pp, NA),
-                e = xxx), ## still not clear what e is but see "E" argument as input to inla() and "e.pp" in Suhaimi code
+    data = list(y = cbind(NA, y.pp_marker, NA),
+                e = e.pp_marker), ## 
     effects = list(
       list( ## element 1 of effects list contains intercept, env covars and bias covar (if any)
         data.frame(
-          interceptB = rep(1, length(marker.pp)),
-          data_marker %>% dplyr::select(sst,bathy)
-          #bias = xxx ## only need this if estimating bias covar?
-        )
-      ),
-      list( ## element 2 of effects list contains "groupings" from Suhaimi. still unclear what they do except that field.group groups the data types. we call this one group #1
-        data.frame(
-          uns_field = 1:spde$n.spde ## 1:n integration points from the mesh?
-        ),
-        field.group = rep(2, spde$n.spde) ## a group number
-      )
-    ), ## close effects list
-    A = list(data_marker_A, 1),
-    tag = 'marker'
-  )
+          intercept_marker = rep(1, nv + n_marker)),
+          env = c(covariate, data_marker$env)),
+        list(data.frame(spatial_field = 1:spde$n.spde),
+             spatial_field.group = rep("marker", spde$n.spde),
+             data.frame(bias_field_marker = 1:spde$n.spde))),
+      A = list(1, A.pp_marker),
+      tag = "marker_data")
   
   
   stack_etag <- inla.stack(
@@ -548,6 +572,29 @@ if (run_bsh){
     A = list(data_etag_A, 1),
     tag = 'etag'
   )
+  
+  
+  stack_observer <- inla.stack(
+    data = list(pres = cbind(data_observer$pres, NA, NA),
+                Ntrials = rep(1, nrow(data_observer))), ## still not clear what exactly Ntrials is but it seems important in "structured" data types (i.e. PA)
+    effects = list(
+      list( ## element 1 of effects list contains intercept, env covars and bias covar (if any)
+        data.frame(
+          interceptA = rep(1, length(data_observer$pres)),
+          data_observer %>% dplyr::select(sst,bathy)
+        )
+      ),
+      list( ## element 2 of effects list contains "groupings" from Suhaimi. still unclear what they do except that field.group groups the data types. we call this one group #1
+        data.frame(
+          uns_field = 1:spde$n.spde ## 1:n integration points from the mesh?
+        ),
+        field.group = rep(1, spde$n.spde) ## a group number
+      )
+    ), ## close effects list
+    A = list(data_observer_A, 1),
+    tag = 'observer'
+  )
+  
   
   ## combine the stacks
   stk <- inla.stack(stack_observer, stack_marker, stack_etag)
@@ -695,6 +742,21 @@ if (run_bsh){
 
 if (run_cameletti){
   
+  
+  field.indices =
+    inla.spde.make.index("field",
+                         n.spde=spde$n.spde)#,
+                         n.group=n_days)
+  stack.est =
+    inla.stack(data=list(logPM10=Piemonte_data$logPM10),
+               A=list(A.est, 1),
+               effects=
+                 list(c(field.indices,
+                        list(Intercept=1)),
+                      list(Piemonte_data[,3:10])),
+               tag="est")
+  
+  
   ## this DID run with our observer data as a very small, simple example
   
   field.indices <- inla.spde.make.index("field",
@@ -804,6 +866,16 @@ if (run_suhaimi){
                                  nearest.pixel(mesh$loc[,1],
                                                mesh$loc[,2],
                                                im(biascov)))]
+  
+  biascovariate_rasterim = biascov[Reduce('cbind',
+                                 nearest.pixel(mesh$loc[,1],
+                                               mesh$loc[,2],
+                                               im(biascov_r)))]
+  
+  biascovariate_rastermatim = biascov[Reduce('cbind',
+                                          nearest.pixel(mesh$loc[,1],
+                                                        mesh$loc[,2],
+                                                        im(as.matrix(biascov_r))))]
   
   
   # create data stacks ##
@@ -1023,3 +1095,6 @@ if (run_junk){
   #env_coords <- xyFromCell(mld, 1:ncell(mld))
   
 }
+
+
+r <- raster(xm=0, ymn=0, xmx=100, ymx=100, res=1)
