@@ -630,11 +630,38 @@ env_covariates$rugosity <- raster::extract(rugosity_scaled, cbind(mesh$loc[,1], 
 
 ## get bias covar for marker data at integration points
 biascovariate_marker_re <- raster::extract(marker_bias, cbind(mesh$loc[,1], mesh$loc[,2]))
-
+data_marker$bias <- raster::extract(marker_bias, cbind(data_marker$lon, data_marker$lat))
+bias_observer_hookhours <- data_observer$hookhours
 
 
 # INLA STACK & FIT - BSH --------------------------------------------------------------
 ## build INLA stacks
+
+
+stack_observer <- inla.stack(
+  data = list(pres = cbind(data_observer$pres, NA, NA),
+              Ntrials = rep(1, nrow(data_observer))), ## still not clear what exactly Ntrials is but it seems important in "structured" data types (i.e. PA)
+  effects = list(
+    list( ## element 1 of effects list contains intercept, env covars and bias covar (if any)
+      data.frame(
+        intercept_observer = rep(1, length(data_observer$pres)), 
+        sst = data_observer$sst,
+        #        sss = data_observer$sss,
+        #        ssh = data_observer$ssh,
+        #        mld = data_observer$mld,
+        #        log_eke = data_observer$log_eke,
+        #        sst_sd = data_observer$sst_sd,
+        #        sss_sd = data_observer$sss_sd,
+        #        ssh_sd = data_observer$ssh_sd,
+        bathy = data_observer$bathy,
+        #        rugosity = data_observer$rugosity
+        bias = data_observer$hookhours
+      )),
+    list(data.frame(spatial_field = 1:spde$n.spde),
+         spatial_field.group = rep(1, spde$n.spde))), ## a group number
+  A = list(1, data_observer_A),
+  tag = "observer_data")
+
 
 stack_marker <- inla.stack(
   data = list(y = cbind(NA, y.pp_marker, NA),
@@ -642,19 +669,21 @@ stack_marker <- inla.stack(
   effects = list(
     list( ## element 1 of effects list contains intercept, env covars and bias covar (if any)
       data.frame(
-        intercept_marker = rep(1, nv + n_marker)),
+        intercept_marker = rep(1, nv + n_marker),
       sst = c(env_covariates$sst, data_marker$sst),
-      sss = c(env_covariates$sss, data_marker$sss),
-      ssh = c(env_covariates$ssh, data_marker$ssh),
-      mld = c(env_covariates$mld, data_marker$mld),
-      log_eke = c(env_covariates$log_eke, data_marker$log_eke),
-      sst_sd = c(env_covariates$sst_sd, data_marker$sst_sd),
-      sss_sd = c(env_covariates$sss_sd, data_marker$sss_sd),
-      ssh_sd = c(env_covariates$ssh_sd, data_marker$ssh_sd),
+#      sss = c(env_covariates$sss, data_marker$sss),
+#      ssh = c(env_covariates$ssh, data_marker$ssh),
+#      mld = c(env_covariates$mld, data_marker$mld),
+#      log_eke = c(env_covariates$log_eke, data_marker$log_eke),
+#      sst_sd = c(env_covariates$sst_sd, data_marker$sst_sd),
+#      sss_sd = c(env_covariates$sss_sd, data_marker$sss_sd),
+#      ssh_sd = c(env_covariates$ssh_sd, data_marker$ssh_sd),
       bathy = c(env_covariates$bathy, data_marker$bathy),
-      rugosity = c(env_covariates$rugosity, data_marker$rugosity)),
+#      rugosity = c(env_covariates$rugosity, data_marker$rugosity)
+      bias = c(biascovariate_marker_re, data_marker$bias)
+      )),
     list(data.frame(spatial_field = 1:spde$n.spde),
-         spatial_field.group = rep("marker", spde$n.spde),
+         spatial_field.group = rep(2, spde$n.spde),
          data.frame(bias_field_marker = 1:spde$n.spde))),
   A = list(1, A.pp_marker),
   tag = "marker_data")
@@ -666,45 +695,27 @@ stack_etag <- inla.stack(
   effects = list(
     list( ## element 1 of effects list contains intercept, env covars and bias covar (if any)
       data.frame(
-        intercept_etag = rep(1, nv + n_etag)),
+        intercept_etag = rep(1, nv + n_etag),
       sst = c(env_covariates$sst, data_etag$sst),
-      sss = c(env_covariates$sss, data_etag$sss),
-      ssh = c(env_covariates$ssh, data_etag$ssh),
-      mld = c(env_covariates$mld, data_etag$mld),
-      log_eke = c(env_covariates$log_eke, data_etag$log_eke),
-      sst_sd = c(env_covariates$sst_sd, data_etag$sst_sd),
-      sss_sd = c(env_covariates$sss_sd, data_etag$sss_sd),
-      ssh_sd = c(env_covariates$ssh_sd, data_etag$ssh_sd),
-      bathy = c(env_covariates$bathy, data_etag$bathy),
-      rugosity = c(env_covariates$rugosity, data_etag$rugosity)),
+#      sss = c(env_covariates$sss, data_etag$sss),
+#      ssh = c(env_covariates$ssh, data_etag$ssh),
+#      mld = c(env_covariates$mld, data_etag$mld),
+#      log_eke = c(env_covariates$log_eke, data_etag$log_eke),
+#      sst_sd = c(env_covariates$sst_sd, data_etag$sst_sd),
+#      sss_sd = c(env_covariates$sss_sd, data_etag$sss_sd),
+#      ssh_sd = c(env_covariates$ssh_sd, data_etag$ssh_sd),
+      bathy = c(env_covariates$bathy, data_etag$bathy)
+#      rugosity = c(env_covariates$rugosity, data_etag$rugosity)
+      )),
     list(data.frame(spatial_field = 1:spde$n.spde),
-         spatial_field.group = rep("etag", spde$n.spde), ## a group number
+         spatial_field.group = rep(3, spde$n.spde), ## a group number
          data.frame(bias_field_etag = 1:spde$n.spde))),
   A = list(1, A.pp_etag),
   tag = "etag_data")
 
 
-stack_observer <- inla.stack(
-  data = list(pres = cbind(data_observer$pres, NA, NA),
-              Ntrials = rep(1, nrow(data_observer))), ## still not clear what exactly Ntrials is but it seems important in "structured" data types (i.e. PA)
-  effects = list(
-    list( ## element 1 of effects list contains intercept, env covars and bias covar (if any)
-      data.frame(
-        intercept_observer = rep(1, length(data_observer$pres))), 
-        sst = data_observer$sst,
-        sss = data_observer$sss,
-        ssh = data_observer$ssh,
-        mld = data_observer$mld,
-        log_eke = data_observer$log_eke,
-        sst_sd = data_observer$sst_sd,
-        sss_sd = data_observer$sss_sd,
-        ssh_sd = data_observer$ssh_sd,
-        bathy = data_observer$bathy,
-        rugosity = data_observer$rugosity),
-      list(data.frame(spatial_field = 1:spde$n.spde),
-           spatial_field.group = rep("observer", spde$n.spde))), ## a group number
-    A = list(1, data_observer_A),
-    tag = "observer_data")
+
+# bias = c(biascovariate, unstructured_data$bias))),
 
 ## combine the stacks
 stk <- inla.stack(stack_observer, stack_marker, stack_etag)
@@ -829,17 +840,17 @@ formulaCorrelation = y ~ -1 +
   intercept_etag + # etag intercept (dataset-specific)
   sst +
   #f(inla.group(sst), model="rw2") +
-  sss +
-  ssh +
-  mld +
-  log_eke +
-  sst_sd +
-  ssh_sd +
-  sss_sd + 
+#  sss +
+#  ssh +
+#  mld +
+#  log_eke +
+#  sst_sd +
+#  ssh_sd +
+#  sss_sd + 
+  bathy +
+#  rugosity +
   #env + # environmental covariate (shared across datasets) estimated via joint likelihood
-  #bias_observer_totalhooks + # bias covariate specific to observer dataset
-  #bias_observer_soakdur + # bias covariate specific to observer dataset
-  bias_observer_hookhours +
+  bias +
   f(spatial_field, model = spde, group = spatial_field.group, control.group = list(model = 'exchangeable')) + # spatial field for each dataset with spatial correlation between them
   f(bias_field_marker, model = spde) + # second spatial field (accounting for unknown bias) specific to marker dataset
   f(bias_field_etag, model = spde) # second spatial field (accounting for unknown bias) specific to etag dataset
@@ -856,7 +867,7 @@ formulaCorrelation = y ~ -1 +
 #****************
 ## fit INLA
 ## order in our data stack will be observer (binomial), marker (poisson), etag (poisson)
-result <- inla(formula, 
+result <- inla(formulaCorrelation, 
                family = c("binomial", "poisson", "poisson"),
                data = inla.stack.data(stk),
                control.predictor = list(A = inla.stack.A(stk),
@@ -868,9 +879,12 @@ result <- inla(formula,
                Ntrials = inla.stack.data(stk)$Ntrials,
                control.compute = list(#dic = TRUE, 
                  #cpo = TRUE,
-                 waic = TRUE))
+                 waic = TRUE),
+               verbose = TRUE)
 
-res24<- inla(formula24,
+
+
+res24 <- inla(formula24,
              family="binomial", 
              data=inla.stack.data(stk), 
              keep=FALSE,
