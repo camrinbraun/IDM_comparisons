@@ -30,6 +30,7 @@ if (!exists("build_pred")) { build_pred = FALSE}
 if (!exists("run_cameletti")) { run_cameletti = FALSE}
 if (!exists("run_suhaimi")) { run_suhaimi = FALSE}
 if (!exists("coarse_mesh")) { coarse_mesh = TRUE}
+if (!exists("scale_rasters")) { scale_rasters = FALSE}
 
 
 # GENERATE DATA FOR SIMS --------------------------------------------------------------
@@ -204,48 +205,15 @@ if (sp_subset){
   
 }
 
+data_observer <- data_observer %>%
+  filter_at(vars(sst:rugosity), all_vars(!is.na(.)))
 
-# CHECK ENV COVARIATES (COLLINEARITY, ETC) --------------------------------------------------------------
+data_marker <- data_marker %>%
+  filter_at(vars(sst:rugosity), all_vars(!is.na(.)))
 
-## NA values should have already been removed from all env covariates
-# MCA: The issue of collinearity doesn't seem to come up in the lit on iSDMs but given that coefficient estimation
-# is done with joint likelihood even in the 'correlative' model structure we are using, I believe we need to 
-# check for collinearity in each dataset used in the model. My thought here is that if collinearity is present 
-# but not addressed in a given dataset, then the resulting coefficient likelihood from that submodel will skew 
-# the overall joint likelihood estimate across submodels. Below, I provide a function I wrote for quickly 
-# identifying collinear pairs of covariates in a provided dataset. This is designed to identify those pairs with 
-# |r| > 0.7 (as recommended by Dormann et al. 2013 Ecography) without having to stare at a bunch of plots or match
-# rows to columns visually in a large X by X matrix while remembering to ignore the diagonals and duplication across
-# the upper or lower triangles of the correlation matrix.
+data_etag <- data_etag %>%
+  filter_at(vars(sst:rugosity), all_vars(!is.na(.)))
 
-collinearity <- function(covariates) {
-  # input example:   collinearity(covariates = data_observer[ , c("sst","ssh","chl","bathy")]) # just call covariates by their col names and the function does the rest
-  ## function written by MCA
-  
-  ## if NA values present, can give spurious results
-  if (nrow(na.omit(covariates)) < nrow(covariates)){
-    warning('NA values present in covariates. Using na.omit() to remove them.')
-    print(paste0('Input covariates contained ', nrow(covariates), ' rows of data.'))
-    covariates <- na.omit(covariates)
-    print(paste0('Output covariates, with NA removed, contained ', nrow(covariates), ' rows of data.'))
-  }
-  
-  correlations <- cor(covariates)
-  dimlength <- nrow(covariates)
-  diags <- seq(1, dimlength ^ 2, by = (dimlength + 1))
-  colinears <- which(abs(correlations) > 0.7 & upper.tri(correlations, diag = FALSE) == TRUE)
-  
-  if (length(colinears) != 0){
-    for (i in 1:length(colinears)){
-      ind <- which(correlations == correlations[colinears[i]] & upper.tri(correlations, diag = FALSE) == TRUE, arr.ind = TRUE)
-      print(paste(rownames(correlations)[ind[1]], colnames(correlations)[ind[2]], sep = ", "))
-    }
-  } else {print("No pairwise comparisons with |r| > 0.70")}
-}
-
-collinearity(na.omit(data_observer %>% dplyr::select(sst:rugosity)))
-collinearity(na.omit(data_marker %>% dplyr::select(sst:rugosity)))
-collinearity(na.omit(data_etag %>% dplyr::select(sst:rugosity)))
 
 # BUILD BIAS FIELDS --------------------------------------------------------------
 
@@ -601,7 +569,8 @@ if (scale_rasters){
   
   env_vars <- c('sst','sss','ssh','mld','log_eke','sst_sd','ssh_sd','sss_sd')
   for (tt in env_vars){
-    r <- raster::raster(paste0('/Volumes/Elements/glorys_monthly/climMean_allMonths/', tt, '/cmems_mod_glo_phy_my_0.083_P1M-m_climMean_', tt, '.grd'))
+    if (tt == env_vars[1]) rm(clim_stack)
+    r <- raster::raster(paste0('~/Google Drive/Shared drives/MPG_WHOI/env_data/glorys_monthly/climMean_allMonths/', tt, '/cmems_mod_glo_phy_my_0.083_P1M-m_climMean_', tt, '.grd'))
     names(r) <- tt
     if (!exists('clim_stack')){
       clim_stack <- r
@@ -610,8 +579,8 @@ if (scale_rasters){
     }
   }
   
-  bathy_scaled <- raster::raster('/Volumes/Elements/bathy_scaled_BSHmarker.grd')
-  rugosity_scaled <- raster::raster('/Volumes/Elements/rugosity_scaled_BSHmarker.grd')
+  bathy_scaled <- raster::raster('~/Google Drive/Shared drives/MPG_WHOI/env_data/glorys_monthly/climMean_allMonths/bathy_scaled_BSHmarker.grd')
+  rugosity_scaled <- raster::raster('~/Google Drive/Shared drives/MPG_WHOI/env_data/glorys_monthly/climMean_allMonths/rugosity_scaled_BSHmarker.grd')
   
 }
 
@@ -624,19 +593,60 @@ env_covariates$rugosity <- raster::extract(rugosity_scaled, cbind(mesh$loc[,1], 
 
 ## how do we handle NA values in mesh extraction points???
 
-## how do we handle NA values in training data covars????
 
-
-
-## get bias covar for marker data at integration points
-biascovariate_marker_re <- raster::extract(marker_bias, cbind(mesh$loc[,1], mesh$loc[,2]))
+## get bias covar for marker data and extract at integration points
 data_marker$bias <- raster::extract(marker_bias, cbind(data_marker$lon, data_marker$lat))
-bias_observer_hookhours <- data_observer$hookhours
+data_marker$bias_scaled <- c(scale(data_marker$bias, mean(data_marker$bias, na.rm=T), sd(data_marker$bias, na.rm=T)))
+marker_bias_scaled <- raster::calc(marker_bias, function(x) {scale(x, mean(data_marker$bias, na.rm=T), sd(data_marker$bias, na.rm=T))})
+biascovariate_marker_re <- raster::extract(marker_bias_scaled, cbind(mesh$loc[,1], mesh$loc[,2]))
 
+## get bias covar for observer data
+data_observer$hookhours_scaled <- c(scale(data_observer$hookhours, mean(data_observer$hookhours, na.rm=T), sd(data_observer$hookhours, na.rm=T)))
+
+# CHECK ENV COVARIATES (COLLINEARITY, ETC) --------------------------------------------------------------
+
+## NA values should have already been removed from all env covariates
+# MCA: The issue of collinearity doesn't seem to come up in the lit on iSDMs but given that coefficient estimation
+# is done with joint likelihood even in the 'correlative' model structure we are using, I believe we need to 
+# check for collinearity in each dataset used in the model. My thought here is that if collinearity is present 
+# but not addressed in a given dataset, then the resulting coefficient likelihood from that submodel will skew 
+# the overall joint likelihood estimate across submodels. Below, I provide a function I wrote for quickly 
+# identifying collinear pairs of covariates in a provided dataset. This is designed to identify those pairs with 
+# |r| > 0.7 (as recommended by Dormann et al. 2013 Ecography) without having to stare at a bunch of plots or match
+# rows to columns visually in a large X by X matrix while remembering to ignore the diagonals and duplication across
+# the upper or lower triangles of the correlation matrix.
+
+collinearity <- function(covariates) {
+  # input example:   collinearity(covariates = data_observer[ , c("sst","ssh","chl","bathy")]) # just call covariates by their col names and the function does the rest
+  ## function written by MCA
+  
+  ## if NA values present, can give spurious results
+  if (nrow(na.omit(covariates)) < nrow(covariates)){
+    warning('NA values present in covariates. Using na.omit() to remove them.')
+    print(paste0('Input covariates contained ', nrow(covariates), ' rows of data.'))
+    covariates <- na.omit(covariates)
+    print(paste0('Output covariates, with NA removed, contained ', nrow(covariates), ' rows of data.'))
+  }
+  
+  correlations <- cor(covariates)
+  dimlength <- nrow(covariates)
+  diags <- seq(1, dimlength ^ 2, by = (dimlength + 1))
+  colinears <- which(abs(correlations) > 0.7 & upper.tri(correlations, diag = FALSE) == TRUE)
+  
+  if (length(colinears) != 0){
+    for (i in 1:length(colinears)){
+      ind <- which(correlations == correlations[colinears[i]] & upper.tri(correlations, diag = FALSE) == TRUE, arr.ind = TRUE)
+      print(paste(rownames(correlations)[ind[1]], colnames(correlations)[ind[2]], sep = ", "))
+    }
+  } else {print("No pairwise comparisons with |r| > 0.70")}
+}
+
+collinearity(na.omit(data_observer %>% dplyr::select(sst:rugosity)))
+collinearity(na.omit(data_marker %>% dplyr::select(sst:rugosity)))
+collinearity(na.omit(data_etag %>% dplyr::select(sst:rugosity)))
 
 # INLA STACK & FIT - BSH --------------------------------------------------------------
 ## build INLA stacks
-
 
 stack_observer <- inla.stack(
   data = list(pres = cbind(data_observer$pres, NA, NA),
@@ -646,16 +656,16 @@ stack_observer <- inla.stack(
       data.frame(
         intercept_observer = rep(1, length(data_observer$pres)), 
         sst = data_observer$sst,
-        #        sss = data_observer$sss,
-        #        ssh = data_observer$ssh,
-        #        mld = data_observer$mld,
-        #        log_eke = data_observer$log_eke,
-        #        sst_sd = data_observer$sst_sd,
-        #        sss_sd = data_observer$sss_sd,
-        #        ssh_sd = data_observer$ssh_sd,
+#        sss = data_observer$sss,
+#        ssh = data_observer$ssh,
+        mld = data_observer$mld,
+        log_eke = data_observer$log_eke,
+        sst_sd = data_observer$sst_sd,
+#        sss_sd = data_observer$sss_sd,
+#        ssh_sd = data_observer$ssh_sd,
         bathy = data_observer$bathy,
-        #        rugosity = data_observer$rugosity
-        bias = data_observer$hookhours
+        rugosity = data_observer$rugosity,
+        bias_observer = data_observer$hookhours_scaled
       )),
     list(data.frame(spatial_field = 1:spde$n.spde),
          spatial_field.group = rep(1, spde$n.spde))), ## a group number
@@ -673,14 +683,14 @@ stack_marker <- inla.stack(
       sst = c(env_covariates$sst, data_marker$sst),
 #      sss = c(env_covariates$sss, data_marker$sss),
 #      ssh = c(env_covariates$ssh, data_marker$ssh),
-#      mld = c(env_covariates$mld, data_marker$mld),
-#      log_eke = c(env_covariates$log_eke, data_marker$log_eke),
-#      sst_sd = c(env_covariates$sst_sd, data_marker$sst_sd),
+      mld = c(env_covariates$mld, data_marker$mld),
+      log_eke = c(env_covariates$log_eke, data_marker$log_eke),
+      sst_sd = c(env_covariates$sst_sd, data_marker$sst_sd),
 #      sss_sd = c(env_covariates$sss_sd, data_marker$sss_sd),
 #      ssh_sd = c(env_covariates$ssh_sd, data_marker$ssh_sd),
       bathy = c(env_covariates$bathy, data_marker$bathy),
-#      rugosity = c(env_covariates$rugosity, data_marker$rugosity)
-      bias = c(biascovariate_marker_re, data_marker$bias)
+      rugosity = c(env_covariates$rugosity, data_marker$rugosity),
+      bias_marker = c(biascovariate_marker_re, data_marker$bias_scaled)
       )),
     list(data.frame(spatial_field = 1:spde$n.spde),
          spatial_field.group = rep(2, spde$n.spde),
@@ -699,13 +709,13 @@ stack_etag <- inla.stack(
       sst = c(env_covariates$sst, data_etag$sst),
 #      sss = c(env_covariates$sss, data_etag$sss),
 #      ssh = c(env_covariates$ssh, data_etag$ssh),
-#      mld = c(env_covariates$mld, data_etag$mld),
-#      log_eke = c(env_covariates$log_eke, data_etag$log_eke),
-#      sst_sd = c(env_covariates$sst_sd, data_etag$sst_sd),
+      mld = c(env_covariates$mld, data_etag$mld),
+      log_eke = c(env_covariates$log_eke, data_etag$log_eke),
+      sst_sd = c(env_covariates$sst_sd, data_etag$sst_sd),
 #      sss_sd = c(env_covariates$sss_sd, data_etag$sss_sd),
 #      ssh_sd = c(env_covariates$ssh_sd, data_etag$ssh_sd),
-      bathy = c(env_covariates$bathy, data_etag$bathy)
-#      rugosity = c(env_covariates$rugosity, data_etag$rugosity)
+      bathy = c(env_covariates$bathy, data_etag$bathy),
+      rugosity = c(env_covariates$rugosity, data_etag$rugosity)
       )),
     list(data.frame(spatial_field = 1:spde$n.spde),
          spatial_field.group = rep(3, spde$n.spde), ## a group number
@@ -838,8 +848,13 @@ formulaCorrelation = y ~ -1 +
   intercept_observer + # observer intercept (dataset-specific)
   intercept_marker + # marker intercept (dataset-specific)
   intercept_etag + # etag intercept (dataset-specific)
-  sst +
-  #f(inla.group(sst), model="rw2") +
+  #sst +
+  f(inla.group(sst, n=10, method="quantile"), model="rw2", constr=FALSE) +
+  f(inla.group(mld, n=10, method="quantile"), model="rw2", constr=FALSE) +
+  f(inla.group(log_eke, n=10, method="quantile"), model="rw2", constr=FALSE) +
+  f(inla.group(sst_sd, n=10, method="quantile"), model="rw2", constr=FALSE) +
+#  f(inla.group(bathy, n=10, method="quantile"), model="rw2", constr=FALSE) +
+#  f(inla.group(rugosity, n=10, method="quantile"), model="rw2", constr=FALSE) +
 #  sss +
 #  ssh +
 #  mld +
@@ -848,9 +863,10 @@ formulaCorrelation = y ~ -1 +
 #  ssh_sd +
 #  sss_sd + 
   bathy +
-#  rugosity +
+  rugosity +
   #env + # environmental covariate (shared across datasets) estimated via joint likelihood
-  bias +
+  bias_observer +
+  bias_marker +
   f(spatial_field, model = spde, group = spatial_field.group, control.group = list(model = 'exchangeable')) + # spatial field for each dataset with spatial correlation between them
   f(bias_field_marker, model = spde) + # second spatial field (accounting for unknown bias) specific to marker dataset
   f(bias_field_etag, model = spde) # second spatial field (accounting for unknown bias) specific to etag dataset
