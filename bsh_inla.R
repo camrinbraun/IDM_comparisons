@@ -270,7 +270,6 @@ if (build_bias){
   if (make_plot) plot(marker_bias, main='marker bias'); world(add=T)
 }
 
-
 #===
 ## ETAG
 ## etag will be daily distance from previous location? or do we need this?
@@ -493,6 +492,22 @@ data_marker[,c(which(names(data_marker) == 'sst'):which(names(data_marker) == 'r
         mean_covariates, sd_covariates)
 
 
+# SCALE ENV COVARIATES - OBSERVER AND ETAG --------------------------------------------------------------
+
+## scale using mean/sd from marker tag data
+
+data_observer <- data_observer %>% as.data.frame()
+data_observer[,c(which(names(data_observer) == 'sst'):which(names(data_observer) == 'rugosity'))] <-
+  scale(data_observer[,c(which(names(data_observer) == 'sst'):which(names(data_observer) == 'rugosity'))],
+        mean_covariates, sd_covariates)
+
+data_etag <- data_etag %>% as.data.frame()
+data_etag[,c(which(names(data_etag) == 'sst'):which(names(data_etag) == 'rugosity'))] <-
+  scale(data_etag[,c(which(names(data_etag) == 'sst'):which(names(data_etag) == 'rugosity'))],
+        mean_covariates, sd_covariates)
+
+
+
 if (scale_rasters){
   
   for (i in 1993:2019){
@@ -569,7 +584,7 @@ if (scale_rasters){
   
   env_vars <- c('sst','sss','ssh','mld','log_eke','sst_sd','ssh_sd','sss_sd')
   for (tt in env_vars){
-    if (tt == env_vars[1]) rm(clim_stack)
+    if (tt == env_vars[1]) try(rm(clim_stack), TRUE)
     r <- raster::raster(paste0('~/Google Drive/Shared drives/MPG_WHOI/env_data/glorys_monthly/climMean_allMonths/', tt, '/cmems_mod_glo_phy_my_0.083_P1M-m_climMean_', tt, '.grd'))
     names(r) <- tt
     if (!exists('clim_stack')){
@@ -590,9 +605,6 @@ if (scale_rasters){
 env_covariates <- raster::extract(clim_stack, cbind(mesh$loc[,1], mesh$loc[,2])) %>% as.data.frame()
 env_covariates$bathy <- raster::extract(bathy_scaled, cbind(mesh$loc[,1], mesh$loc[,2]))
 env_covariates$rugosity <- raster::extract(rugosity_scaled, cbind(mesh$loc[,1], mesh$loc[,2]))
-
-## how do we handle NA values in mesh extraction points???
-
 
 ## get bias covar for marker data and extract at integration points
 data_marker$bias <- raster::extract(marker_bias, cbind(data_marker$lon, data_marker$lat))
@@ -849,10 +861,14 @@ formulaCorrelation = y ~ -1 +
   intercept_marker + # marker intercept (dataset-specific)
   intercept_etag + # etag intercept (dataset-specific)
   #sst +
-  f(inla.group(sst, n=10, method="quantile"), model="rw2", constr=FALSE) +
-  f(inla.group(mld, n=10, method="quantile"), model="rw2", constr=FALSE) +
-  f(inla.group(log_eke, n=10, method="quantile"), model="rw2", constr=FALSE) +
-  f(inla.group(sst_sd, n=10, method="quantile"), model="rw2", constr=FALSE) +
+  #f(inla.group(sst, n=10, method="quantile"), model="rw2", constr=FALSE) +
+  f(inla.group(sst, n=25, method="cut"), model="rw2", constr=FALSE) +
+  f(inla.group(mld, n=25, method="cut"), model="rw2", constr=FALSE) +
+  f(inla.group(log_eke, n=25, method="cut"), model="rw2", constr=FALSE) +
+  f(inla.group(sst_sd, n=25, method="cut"), model="rw2", constr=FALSE) +
+  #f(inla.group(mld, n=10, method="quantile"), model="rw2", constr=FALSE) +
+  #f(inla.group(log_eke, n=10, method="quantile"), model="rw2", constr=FALSE) +
+  #f(inla.group(sst_sd, n=10, method="quantile"), model="rw2", constr=FALSE) +
 #  f(inla.group(bathy, n=10, method="quantile"), model="rw2", constr=FALSE) +
 #  f(inla.group(rugosity, n=10, method="quantile"), model="rw2", constr=FALSE) +
 #  sss +
@@ -862,8 +878,10 @@ formulaCorrelation = y ~ -1 +
 #  sst_sd +
 #  ssh_sd +
 #  sss_sd + 
-  bathy +
-  rugosity +
+  f(inla.group(bathy, n=25, method="cut"), model="rw2", constr=FALSE) +
+  f(inla.group(rugosity, n=25, method="cut"), model="rw2", constr=FALSE) +
+  #bathy +
+  #rugosity +
   #env + # environmental covariate (shared across datasets) estimated via joint likelihood
   bias_observer +
   bias_marker +
