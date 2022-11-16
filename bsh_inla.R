@@ -31,6 +31,7 @@ if (!exists("run_cameletti")) { run_cameletti = FALSE}
 if (!exists("run_suhaimi")) { run_suhaimi = FALSE}
 if (!exists("coarse_mesh")) { coarse_mesh = TRUE}
 if (!exists("scale_rasters")) { scale_rasters = FALSE}
+if (!exists("tiny_sample")) { tiny_sample = TRUE}
 
 
 # GENERATE DATA FOR SIMS --------------------------------------------------------------
@@ -195,6 +196,15 @@ if (sp_subset){
   data_observer <- data_observer %>% filter(lon > xl[1] & lon < xl[2] & lat > yl[1] & lat < yl[2])
   data_marker <- data_marker %>% filter(lon > xl[1] & lon < xl[2] & lat > yl[1] & lat < yl[2])
   data_etag <- data_etag %>% filter(lon > xl[1] & lon < xl[2] & lat > yl[1] & lat < yl[2])
+  
+  if (tiny_sample){
+    print(paste("**---- Using tiny subset of n=300 for each data type and subset of study domain to speed things up ----**"))
+    data_observer <- data_observer[sample(1:nrow(data_observer), 300, replace = F),]
+    data_marker <- data_marker[sample(1:nrow(data_marker), 300, replace = F),]
+    data_etag <- data_etag[sample(1:nrow(data_etag), 300, replace = F),]
+  }
+  
+  
   
 } else{
   
@@ -615,6 +625,14 @@ biascovariate_marker_re <- raster::extract(marker_bias_scaled, cbind(mesh$loc[,1
 ## get bias covar for observer data
 data_observer$hookhours_scaled <- c(scale(data_observer$hookhours, mean(data_observer$hookhours, na.rm=T), sd(data_observer$hookhours, na.rm=T)))
 
+
+## clean up the NAs to see if that's a problem
+for (i in 1:ncol(env_covariates)){
+  env_covariates[which(is.na(env_covariates[,i])),i] <- -5
+}
+
+biascovariate_marker_re[which(is.na(biascovariate_marker_re))] <- -2
+
 # CHECK ENV COVARIATES (COLLINEARITY, ETC) --------------------------------------------------------------
 
 ## NA values should have already been removed from all env covariates
@@ -667,17 +685,17 @@ stack_observer <- inla.stack(
     list( ## element 1 of effects list contains intercept, env covars and bias covar (if any)
       data.frame(
         intercept_observer = rep(1, length(data_observer$pres)), 
-        sst = data_observer$sst,
+        sst = data_observer$sst
 #        sss = data_observer$sss,
 #        ssh = data_observer$ssh,
-        mld = data_observer$mld,
-        log_eke = data_observer$log_eke,
-        sst_sd = data_observer$sst_sd,
+#        mld = data_observer$mld,
+#        log_eke = data_observer$log_eke,
+#        sst_sd = data_observer$sst_sd,
 #        sss_sd = data_observer$sss_sd,
 #        ssh_sd = data_observer$ssh_sd,
-        bathy = data_observer$bathy,
-        rugosity = data_observer$rugosity,
-        bias_observer = data_observer$hookhours_scaled
+#        bathy = data_observer$bathy,
+#        rugosity = data_observer$rugosity,
+#        bias_observer = data_observer$hookhours_scaled
       )),
     list(data.frame(spatial_field = 1:spde$n.spde),
          spatial_field.group = rep(1, spde$n.spde))), ## a group number
@@ -692,21 +710,22 @@ stack_marker <- inla.stack(
     list( ## element 1 of effects list contains intercept, env covars and bias covar (if any)
       data.frame(
         intercept_marker = rep(1, nv + n_marker),
-      sst = c(env_covariates$sst, data_marker$sst),
+      sst = c(env_covariates$sst, data_marker$sst)
 #      sss = c(env_covariates$sss, data_marker$sss),
 #      ssh = c(env_covariates$ssh, data_marker$ssh),
-      mld = c(env_covariates$mld, data_marker$mld),
-      log_eke = c(env_covariates$log_eke, data_marker$log_eke),
-      sst_sd = c(env_covariates$sst_sd, data_marker$sst_sd),
+#      mld = c(env_covariates$mld, data_marker$mld),
+#      log_eke = c(env_covariates$log_eke, data_marker$log_eke),
+#      sst_sd = c(env_covariates$sst_sd, data_marker$sst_sd),
 #      sss_sd = c(env_covariates$sss_sd, data_marker$sss_sd),
 #      ssh_sd = c(env_covariates$ssh_sd, data_marker$ssh_sd),
-      bathy = c(env_covariates$bathy, data_marker$bathy),
-      rugosity = c(env_covariates$rugosity, data_marker$rugosity),
-      bias_marker = c(biascovariate_marker_re, data_marker$bias_scaled)
+#      bathy = c(env_covariates$bathy, data_marker$bathy),
+#      rugosity = c(env_covariates$rugosity, data_marker$rugosity),
+#      bias_marker = c(biascovariate_marker_re, data_marker$bias_scaled)
       )),
     list(data.frame(spatial_field = 1:spde$n.spde),
-         spatial_field.group = rep(2, spde$n.spde),
-         data.frame(bias_field_marker = 1:spde$n.spde))),
+         spatial_field.group = rep(2, spde$n.spde)
+         #data.frame(bias_field_marker = 1:spde$n.spde)
+         )),
   A = list(1, A.pp_marker),
   tag = "marker_data")
 
@@ -718,20 +737,21 @@ stack_etag <- inla.stack(
     list( ## element 1 of effects list contains intercept, env covars and bias covar (if any)
       data.frame(
         intercept_etag = rep(1, nv + n_etag),
-      sst = c(env_covariates$sst, data_etag$sst),
+      sst = c(env_covariates$sst, data_etag$sst)
 #      sss = c(env_covariates$sss, data_etag$sss),
 #      ssh = c(env_covariates$ssh, data_etag$ssh),
-      mld = c(env_covariates$mld, data_etag$mld),
-      log_eke = c(env_covariates$log_eke, data_etag$log_eke),
-      sst_sd = c(env_covariates$sst_sd, data_etag$sst_sd),
+#      mld = c(env_covariates$mld, data_etag$mld),
+#      log_eke = c(env_covariates$log_eke, data_etag$log_eke),
+#      sst_sd = c(env_covariates$sst_sd, data_etag$sst_sd),
 #      sss_sd = c(env_covariates$sss_sd, data_etag$sss_sd),
 #      ssh_sd = c(env_covariates$ssh_sd, data_etag$ssh_sd),
-      bathy = c(env_covariates$bathy, data_etag$bathy),
-      rugosity = c(env_covariates$rugosity, data_etag$rugosity)
+#      bathy = c(env_covariates$bathy, data_etag$bathy),
+#      rugosity = c(env_covariates$rugosity, data_etag$rugosity)
       )),
     list(data.frame(spatial_field = 1:spde$n.spde),
-         spatial_field.group = rep(3, spde$n.spde), ## a group number
-         data.frame(bias_field_etag = 1:spde$n.spde))),
+         spatial_field.group = rep(3, spde$n.spde) ## a group number
+         #data.frame(bias_field_etag = 1:spde$n.spde)
+         )),
   A = list(1, A.pp_etag),
   tag = "etag_data")
 
@@ -860,12 +880,12 @@ formulaCorrelation = y ~ -1 +
   intercept_observer + # observer intercept (dataset-specific)
   intercept_marker + # marker intercept (dataset-specific)
   intercept_etag + # etag intercept (dataset-specific)
-  #sst +
+  sst +
   #f(inla.group(sst, n=10, method="quantile"), model="rw2", constr=FALSE) +
-  f(inla.group(sst, n=25, method="cut"), model="rw2", constr=FALSE) +
-  f(inla.group(mld, n=25, method="cut"), model="rw2", constr=FALSE) +
-  f(inla.group(log_eke, n=25, method="cut"), model="rw2", constr=FALSE) +
-  f(inla.group(sst_sd, n=25, method="cut"), model="rw2", constr=FALSE) +
+  #f(inla.group(sst, n=25, method="cut"), model="rw2", constr=FALSE) +
+  #f(inla.group(mld, n=25, method="cut"), model="rw2", constr=FALSE) +
+  #f(inla.group(log_eke, n=25, method="cut"), model="rw2", constr=FALSE) +
+  #f(inla.group(sst_sd, n=25, method="cut"), model="rw2", constr=FALSE) +
   #f(inla.group(mld, n=10, method="quantile"), model="rw2", constr=FALSE) +
   #f(inla.group(log_eke, n=10, method="quantile"), model="rw2", constr=FALSE) +
   #f(inla.group(sst_sd, n=10, method="quantile"), model="rw2", constr=FALSE) +
@@ -878,16 +898,16 @@ formulaCorrelation = y ~ -1 +
 #  sst_sd +
 #  ssh_sd +
 #  sss_sd + 
-  f(inla.group(bathy, n=25, method="cut"), model="rw2", constr=FALSE) +
-  f(inla.group(rugosity, n=25, method="cut"), model="rw2", constr=FALSE) +
+  #f(inla.group(bathy, n=25, method="cut"), model="rw2", constr=FALSE) +
+  #f(inla.group(rugosity, n=25, method="cut"), model="rw2", constr=FALSE) +
   #bathy +
   #rugosity +
   #env + # environmental covariate (shared across datasets) estimated via joint likelihood
-  bias_observer +
-  bias_marker +
-  f(spatial_field, model = spde, group = spatial_field.group, control.group = list(model = 'exchangeable')) + # spatial field for each dataset with spatial correlation between them
-  f(bias_field_marker, model = spde) + # second spatial field (accounting for unknown bias) specific to marker dataset
-  f(bias_field_etag, model = spde) # second spatial field (accounting for unknown bias) specific to etag dataset
+  #bias_observer +
+  #bias_marker +
+  f(spatial_field, model = spde, group = spatial_field.group, control.group = list(model = 'exchangeable')) #+ # spatial field for each dataset with spatial correlation between them
+  #f(bias_field_marker, model = spde) + # second spatial field (accounting for unknown bias) specific to marker dataset
+  #f(bias_field_etag, model = spde) # second spatial field (accounting for unknown bias) specific to etag dataset
 
 
 #formula = pres ~ -1 + 
@@ -914,19 +934,20 @@ result <- inla(formulaCorrelation,
                control.compute = list(#dic = TRUE, 
                  #cpo = TRUE,
                  waic = TRUE),
-               verbose = TRUE)
+               verbose = TRUE,
+               safe = TRUE)
 
 
-
-res24 <- inla(formula24,
-             family="binomial", 
-             data=inla.stack.data(stk), 
-             keep=FALSE,
-             #control.family=list(hyper=list(prec=list(param=c(1,0.5)))),
-             control.predictor=list(A=inla.stack.A(stk), compute=TRUE, link=1),#link=1
-             control.inla=list(tolerance=1e-5,numint.maxfeval= 10e6),
-             #control.fixed = list(expand.factor.strategy='inla'),
-             control.compute = list(return.marginals=TRUE,dic=TRUE, cpo=TRUE))
+## FROM NEREA
+#res24 <- inla(formula24,
+#             family="binomial", 
+#             data=inla.stack.data(stk), 
+#             keep=FALSE,
+#             #control.family=list(hyper=list(prec=list(param=c(1,0.5)))),
+#             control.predictor=list(A=inla.stack.A(stk), compute=TRUE, link=1),#link=1
+#             control.inla=list(tolerance=1e-5,numint.maxfeval= 10e6),
+#             #control.fixed = list(expand.factor.strategy='inla'),
+#             control.compute = list(return.marginals=TRUE,dic=TRUE, cpo=TRUE))
   
   
   
@@ -943,7 +964,7 @@ if (run_cameletti){
   field.indices =
     inla.spde.make.index("field",
                          n.spde=spde$n.spde)#,
-                         n.group=n_days)
+#                         n.group=n_days)
   stack.est =
     inla.stack(data=list(logPM10=Piemonte_data$logPM10),
                A=list(A.est, 1),
@@ -1293,5 +1314,3 @@ if (run_junk){
   
 }
 
-
-r <- raster(xm=0, ymn=0, xmx=100, ymx=100, res=1)
