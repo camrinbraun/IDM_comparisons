@@ -1,5 +1,10 @@
 ## from https://github.com/NERC-CEH/IDM_comparisons and Suhaimi et al 2021 
 
+
+t1 <- Sys.time()
+sink(paste0('file_', format(t1, '%Y-%m-%dT%H%M%SZ'), '.txt'))
+
+
 # PACKAGES --------------------------------------------------------------
 
 # packages
@@ -31,8 +36,8 @@ if (!exists("run_cameletti")) { run_cameletti = FALSE}
 if (!exists("run_suhaimi")) { run_suhaimi = FALSE}
 if (!exists("coarse_mesh")) { coarse_mesh = TRUE}
 if (!exists("scale_rasters")) { scale_rasters = FALSE}
-if (!exists("tiny_sample")) { tiny_sample = TRUE}
 
+sp_subset = FALSE
 
 # GENERATE DATA FOR SIMS --------------------------------------------------------------
 
@@ -180,7 +185,7 @@ if (get_data){
 } else{
   
   data_observer <- data.table::fread('~/Google Drive/Shared drives/MPG_WHOI/data/bsh_inla/bsh_observer.csv')
-  data_observer$hookhours <- data_observer$NUMBER_HOOKS_SET / data_observer$SOAK_TIME
+  data_observer$hookhours <- data_observer$NUMBER_HOOKS_SET * data_observer$SOAK_TIME
   data_marker <- data.table::fread('~/Google Drive/Shared drives/MPG_WHOI/data/bsh_inla/bsh_marker.csv')
   data_etag <- data.table::fread('~/Google Drive/Shared drives/MPG_WHOI/data/bsh_inla/bsh_etag.csv')
   
@@ -196,15 +201,6 @@ if (sp_subset){
   data_observer <- data_observer %>% filter(lon > xl[1] & lon < xl[2] & lat > yl[1] & lat < yl[2])
   data_marker <- data_marker %>% filter(lon > xl[1] & lon < xl[2] & lat > yl[1] & lat < yl[2])
   data_etag <- data_etag %>% filter(lon > xl[1] & lon < xl[2] & lat > yl[1] & lat < yl[2])
-  
-  if (tiny_sample){
-    print(paste("**---- Using tiny subset of n=300 for each data type and subset of study domain to speed things up ----**"))
-    data_observer <- data_observer[sample(1:nrow(data_observer), 300, replace = F),]
-    data_marker <- data_marker[sample(1:nrow(data_marker), 300, replace = F),]
-    data_etag <- data_etag[sample(1:nrow(data_etag), 300, replace = F),]
-  }
-  
-  
   
 } else{
   
@@ -447,7 +443,7 @@ data_etag_A <- inla.spde.make.A(mesh = mesh,
                                 loc = as.matrix(data_etag[,c('lon','lat')])
                                 #group=Piemonte_data$time, ## these temporal groupings are from Cameletti, not sure if we need them?
                                 #n.group=n_days
-                                )
+)
 ## ^^^ perhaps grouping argument above is way to account for individual in etag data?
 
 
@@ -495,7 +491,7 @@ A.pp_etag <- rbind(imat, data_etag_A)
 mean_covariates <- apply(data_marker %>% 
                            dplyr::select(sst:rugosity), 2, function(x) mean(x, na.rm=T))
 sd_covariates <- apply(data_marker %>% 
-                           dplyr::select(sst:rugosity), 2, function(x) sd(x, na.rm=T))
+                         dplyr::select(sst:rugosity), 2, function(x) sd(x, na.rm=T))
 data_marker <- data_marker %>% as.data.frame()
 data_marker[,c(which(names(data_marker) == 'sst'):which(names(data_marker) == 'rugosity'))] <-
   scale(data_marker[,c(which(names(data_marker) == 'sst'):which(names(data_marker) == 'rugosity'))],
@@ -515,8 +511,6 @@ data_etag <- data_etag %>% as.data.frame()
 data_etag[,c(which(names(data_etag) == 'sst'):which(names(data_etag) == 'rugosity'))] <-
   scale(data_etag[,c(which(names(data_etag) == 'sst'):which(names(data_etag) == 'rugosity'))],
         mean_covariates, sd_covariates)
-
-
 
 if (scale_rasters){
   
@@ -625,14 +619,6 @@ biascovariate_marker_re <- raster::extract(marker_bias_scaled, cbind(mesh$loc[,1
 ## get bias covar for observer data
 data_observer$hookhours_scaled <- c(scale(data_observer$hookhours, mean(data_observer$hookhours, na.rm=T), sd(data_observer$hookhours, na.rm=T)))
 
-
-## clean up the NAs to see if that's a problem
-for (i in 1:ncol(env_covariates)){
-  env_covariates[which(is.na(env_covariates[,i])),i] <- -5
-}
-
-biascovariate_marker_re[which(is.na(biascovariate_marker_re))] <- -2
-
 # CHECK ENV COVARIATES (COLLINEARITY, ETC) --------------------------------------------------------------
 
 ## NA values should have already been removed from all env covariates
@@ -685,17 +671,17 @@ stack_observer <- inla.stack(
     list( ## element 1 of effects list contains intercept, env covars and bias covar (if any)
       data.frame(
         intercept_observer = rep(1, length(data_observer$pres)), 
-        sst = data_observer$sst
-#        sss = data_observer$sss,
-#        ssh = data_observer$ssh,
-#        mld = data_observer$mld,
-#        log_eke = data_observer$log_eke,
-#        sst_sd = data_observer$sst_sd,
-#        sss_sd = data_observer$sss_sd,
-#        ssh_sd = data_observer$ssh_sd,
-#        bathy = data_observer$bathy,
-#        rugosity = data_observer$rugosity,
-#        bias_observer = data_observer$hookhours_scaled
+        sst = data_observer$sst,
+        sss = data_observer$sss,
+        ssh = data_observer$ssh,
+        mld = data_observer$mld,
+        log_eke = data_observer$log_eke,
+        sst_sd = data_observer$sst_sd,
+        sss_sd = data_observer$sss_sd,
+        ssh_sd = data_observer$ssh_sd,
+        bathy = data_observer$bathy,
+        rugosity = data_observer$rugosity,
+        bias_observer = data_observer$hookhours_scaled
       )),
     list(data.frame(spatial_field = 1:spde$n.spde),
          spatial_field.group = rep(1, spde$n.spde))), ## a group number
@@ -710,22 +696,21 @@ stack_marker <- inla.stack(
     list( ## element 1 of effects list contains intercept, env covars and bias covar (if any)
       data.frame(
         intercept_marker = rep(1, nv + n_marker),
-      sst = c(env_covariates$sst, data_marker$sst)
-#      sss = c(env_covariates$sss, data_marker$sss),
-#      ssh = c(env_covariates$ssh, data_marker$ssh),
-#      mld = c(env_covariates$mld, data_marker$mld),
-#      log_eke = c(env_covariates$log_eke, data_marker$log_eke),
-#      sst_sd = c(env_covariates$sst_sd, data_marker$sst_sd),
-#      sss_sd = c(env_covariates$sss_sd, data_marker$sss_sd),
-#      ssh_sd = c(env_covariates$ssh_sd, data_marker$ssh_sd),
-#      bathy = c(env_covariates$bathy, data_marker$bathy),
-#      rugosity = c(env_covariates$rugosity, data_marker$rugosity),
-#      bias_marker = c(biascovariate_marker_re, data_marker$bias_scaled)
+        sst = c(env_covariates$sst, data_marker$sst),
+        sss = c(env_covariates$sss, data_marker$sss),
+        ssh = c(env_covariates$ssh, data_marker$ssh),
+        mld = c(env_covariates$mld, data_marker$mld),
+        log_eke = c(env_covariates$log_eke, data_marker$log_eke),
+        sst_sd = c(env_covariates$sst_sd, data_marker$sst_sd),
+        sss_sd = c(env_covariates$sss_sd, data_marker$sss_sd),
+        ssh_sd = c(env_covariates$ssh_sd, data_marker$ssh_sd),
+        bathy = c(env_covariates$bathy, data_marker$bathy),
+        rugosity = c(env_covariates$rugosity, data_marker$rugosity),
+        bias_marker = c(biascovariate_marker_re, data_marker$bias_scaled)
       )),
     list(data.frame(spatial_field = 1:spde$n.spde),
-         spatial_field.group = rep(2, spde$n.spde)
-         #data.frame(bias_field_marker = 1:spde$n.spde)
-         )),
+         spatial_field.group = rep(2, spde$n.spde),
+         data.frame(bias_field_marker = 1:spde$n.spde))),
   A = list(1, A.pp_marker),
   tag = "marker_data")
 
@@ -737,21 +722,20 @@ stack_etag <- inla.stack(
     list( ## element 1 of effects list contains intercept, env covars and bias covar (if any)
       data.frame(
         intercept_etag = rep(1, nv + n_etag),
-      sst = c(env_covariates$sst, data_etag$sst)
-#      sss = c(env_covariates$sss, data_etag$sss),
-#      ssh = c(env_covariates$ssh, data_etag$ssh),
-#      mld = c(env_covariates$mld, data_etag$mld),
-#      log_eke = c(env_covariates$log_eke, data_etag$log_eke),
-#      sst_sd = c(env_covariates$sst_sd, data_etag$sst_sd),
-#      sss_sd = c(env_covariates$sss_sd, data_etag$sss_sd),
-#      ssh_sd = c(env_covariates$ssh_sd, data_etag$ssh_sd),
-#      bathy = c(env_covariates$bathy, data_etag$bathy),
-#      rugosity = c(env_covariates$rugosity, data_etag$rugosity)
+        sst = c(env_covariates$sst, data_etag$sst),
+        sss = c(env_covariates$sss, data_etag$sss),
+        ssh = c(env_covariates$ssh, data_etag$ssh),
+        mld = c(env_covariates$mld, data_etag$mld),
+        log_eke = c(env_covariates$log_eke, data_etag$log_eke),
+        sst_sd = c(env_covariates$sst_sd, data_etag$sst_sd),
+        sss_sd = c(env_covariates$sss_sd, data_etag$sss_sd),
+        ssh_sd = c(env_covariates$ssh_sd, data_etag$ssh_sd),
+        bathy = c(env_covariates$bathy, data_etag$bathy),
+        rugosity = c(env_covariates$rugosity, data_etag$rugosity)
       )),
     list(data.frame(spatial_field = 1:spde$n.spde),
-         spatial_field.group = rep(3, spde$n.spde) ## a group number
-         #data.frame(bias_field_etag = 1:spde$n.spde)
-         )),
+         spatial_field.group = rep(3, spde$n.spde), ## a group number
+         data.frame(bias_field_etag = 1:spde$n.spde))),
   A = list(1, A.pp_etag),
   tag = "etag_data")
 
@@ -762,104 +746,6 @@ stack_etag <- inla.stack(
 ## combine the stacks
 stk <- inla.stack(stack_observer, stack_marker, stack_etag)
 
-## create a prediction stack
-if (build_pred){
-  stop('THIS NEEDS WORK, currently copied from Suhaimi and slightly modified')
-  
-  ## create an expand.grid() of desired output grid (e.g. coordinates for each cell)
-  pred.grid <- expand.grid(x=seq(resolution[1]/2,
-                                 max(biasfield$x),
-                                 resolution[1]), 
-                           y=seq(resolution[2]/2, 
-                                 max(biasfield$y),
-                                 resolution[2])) # make grid
-  
-  dim(pred.grid) 
-  
-  ## extract covariate values at these points
-  ## ***** this is the tricky part ****
-  
-  ## create A.pred matrix based on mesh and pred coordinates
-  A.pred <- inla.spde.make.A(mesh, loc=as.matrix(pred.grid[,1:2]))
-  
-  np = length(pred.grid[,1]) # number of points
-  ys <- cbind(rep(NA, nrow(pred.grid)), rep(NA, nrow(pred.grid))) ## fill pred "data" with NAs
-  
-  stack.pred_observer =
-    inla.stack(
-      data = list(
-        pres = ys
-      ),
-      effects = list(
-        list( ## element 1 of effects list contains intercept, env covars and bias covar (if any)
-          data.frame(
-            interceptA = rep(1, np), ## assuming these intercepts mirror the corresponding data-based stack
-            sst = xxx,
-            bathy = xxx
-          )
-        ),
-        list( ## element 2 of effects list contains "groupings" from Suhaimi. still unclear what they do except that field.group groups the data types. we call this one group #1
-          data.frame(
-            uns_field = 1:spde$n.spde ## 1:n integration points from the mesh?
-          ),
-          field.group = rep(1, spde$n.spde) ## a group number
-        )
-      ), ## close effects list
-      A = list(1, 1, A.pred), ## not sure why this structure
-      tag = 'pred.observer'
-    )
-  
-  stack.pred_marker =
-    inla.stack(
-      data = list(
-        pres = ys
-      ),
-      effects = list(
-        list( ## element 1 of effects list contains intercept, env covars and bias covar (if any)
-          data.frame(
-            interceptB = rep(1, np), ## assuming these intercepts mirror the corresponding data-based stack
-            sst = xxx,
-            bathy = xxx
-          )
-        ),
-        list( ## element 2 of effects list contains "groupings" from Suhaimi. still unclear what they do except that field.group groups the data types. we call this one group #1
-          data.frame(
-            uns_field = 1:spde$n.spde ## 1:n integration points from the mesh?
-          ),
-          field.group = rep(2, spde$n.spde) ## a group number
-        )
-      ), ## close effects list
-      A = list(1, 1, A.pred), ## not sure why this structure
-      tag = 'pred.marker'
-    )
-  
-  stack.pred_etag =
-    inla.stack(
-      data = list(
-        pres = ys
-      ),
-      effects = list(
-        list( ## element 1 of effects list contains intercept, env covars and bias covar (if any)
-          data.frame(
-            interceptC = rep(1, np), ## assuming these intercepts mirror the corresponding data-based stack
-            sst = xxx,
-            bathy = xxx
-          )
-        ),
-        list( ## element 2 of effects list contains "groupings" from Suhaimi. still unclear what they do except that field.group groups the data types. we call this one group #1
-          data.frame(
-            uns_field = 1:spde$n.spde ## 1:n integration points from the mesh?
-          ),
-          field.group = rep(3, spde$n.spde) ## a group number
-        )
-      ), ## close effects list
-      A = list(1, 1, A.pred), ## not sure why this structure
-      tag = 'pred.etag'
-    )
-  
-  stk <- inla.stack(stk, stack.pred_observer, stack.pred_marker, stack.pred_etag)
-  
-}
 
 #****************
 ## specify model formulation
@@ -880,47 +766,33 @@ formulaCorrelation = y ~ -1 +
   intercept_observer + # observer intercept (dataset-specific)
   intercept_marker + # marker intercept (dataset-specific)
   intercept_etag + # etag intercept (dataset-specific)
-  sst +
-  #f(inla.group(sst, n=10, method="quantile"), model="rw2", constr=FALSE) +
-  #f(inla.group(sst, n=25, method="cut"), model="rw2", constr=FALSE) +
-  #f(inla.group(mld, n=25, method="cut"), model="rw2", constr=FALSE) +
-  #f(inla.group(log_eke, n=25, method="cut"), model="rw2", constr=FALSE) +
-  #f(inla.group(sst_sd, n=25, method="cut"), model="rw2", constr=FALSE) +
-  #f(inla.group(mld, n=10, method="quantile"), model="rw2", constr=FALSE) +
-  #f(inla.group(log_eke, n=10, method="quantile"), model="rw2", constr=FALSE) +
-  #f(inla.group(sst_sd, n=10, method="quantile"), model="rw2", constr=FALSE) +
-#  f(inla.group(bathy, n=10, method="quantile"), model="rw2", constr=FALSE) +
-#  f(inla.group(rugosity, n=10, method="quantile"), model="rw2", constr=FALSE) +
-#  sss +
-#  ssh +
-#  mld +
-#  log_eke +
-#  sst_sd +
-#  ssh_sd +
-#  sss_sd + 
-  #f(inla.group(bathy, n=25, method="cut"), model="rw2", constr=FALSE) +
-  #f(inla.group(rugosity, n=25, method="cut"), model="rw2", constr=FALSE) +
+  #sst +
   #bathy +
-  #rugosity +
-  #env + # environmental covariate (shared across datasets) estimated via joint likelihood
-  #bias_observer +
-  #bias_marker +
-  f(spatial_field, model = spde, group = spatial_field.group, control.group = list(model = 'exchangeable')) #+ # spatial field for each dataset with spatial correlation between them
-  #f(bias_field_marker, model = spde) + # second spatial field (accounting for unknown bias) specific to marker dataset
-  #f(bias_field_etag, model = spde) # second spatial field (accounting for unknown bias) specific to etag dataset
-
-
-#formula = pres ~ -1 + 
-#  interceptA + interceptB + interceptC + ## intercepts for each of the three datasets
-#  bias + ## how to incorporate multiple bias fields?
-#  sst + bathy + ## as example env covariates to start with
-#  f(uns_field, model = spde, group = field.group, control.group = list(model = 'exchangeable'))
+  f(inla.group(sst, n=25, method="cut"), model="rw2", constr=FALSE) +
+  f(inla.group(mld, n=25, method="cut"), model="rw2", constr=FALSE) +
+  #f(inla.group(log_eke, n=25, method="cut"), model="rw2", constr=FALSE) +
+  f(inla.group(sst_sd, n=25, method="cut"), model="rw2", constr=FALSE) +
+  f(inla.group(bathy, n=25, method="cut"), model="rw2", constr=FALSE) +
+  f(inla.group(rugosity, n=25, method="cut"), model="rw2", constr=FALSE) +
+  ###f(inla.group(sst, n=10, method="quantile"), model="rw2", constr=FALSE) +
+  ###f(inla.group(mld, n=10, method="quantile"), model="rw2", constr=FALSE) +
+  ###f(inla.group(log_eke, n=10, method="quantile"), model="rw2", constr=FALSE) +
+  ###f(inla.group(sst_sd, n=10, method="quantile"), model="rw2", constr=FALSE) +
+  ###f(inla.group(bathy, n=10, method="quantile"), model="rw2", constr=FALSE) +
+  ###f(inla.group(rugosity, n=10, method="quantile"), model="rw2", constr=FALSE) +
+  bias_observer +
+  bias_marker +
+  f(spatial_field, model = spde, group = spatial_field.group, control.group = list(model = 'exchangeable')) + # spatial field for each dataset with spatial correlation between them
+  f(bias_field_marker, model = spde) + # second spatial field (accounting for unknown bias) specific to marker dataset
+  f(bias_field_etag, model = spde) # second spatial field (accounting for unknown bias) specific to etag dataset
 
 
 
 #****************
 ## fit INLA
 ## order in our data stack will be observer (binomial), marker (poisson), etag (poisson)
+inla.getOption()
+#inla.setOption(inla.mode = 'experimental')
 result <- inla(formulaCorrelation, 
                family = c("binomial", "poisson", "poisson"),
                data = inla.stack.data(stk),
@@ -934,383 +806,16 @@ result <- inla(formulaCorrelation,
                control.compute = list(#dic = TRUE, 
                  #cpo = TRUE,
                  waic = TRUE),
-               verbose = TRUE,
+               verbose = TRUE, 
                safe = TRUE)
 
+t2 <- Sys.time()
 
-## FROM NEREA
-#res24 <- inla(formula24,
-#             family="binomial", 
-#             data=inla.stack.data(stk), 
-#             keep=FALSE,
-#             #control.family=list(hyper=list(prec=list(param=c(1,0.5)))),
-#             control.predictor=list(A=inla.stack.A(stk), compute=TRUE, link=1),#link=1
-#             control.inla=list(tolerance=1e-5,numint.maxfeval= 10e6),
-#             #control.fixed = list(expand.factor.strategy='inla'),
-#             control.compute = list(return.marginals=TRUE,dic=TRUE, cpo=TRUE))
-  
-  
-  
-  
-  
-  
+print(str(data_marker))
+print(str(data_etag))
+print(str(data_observer))
+print(formulaCorrelation)
+print(paste0('Start time ', t1))
+print(paste0('End time ', t2))
 
-# INLA STACK & FIT V1 - CAMELETTI --------------------------------------------------------------
-## we need aspects of the spatiotemporal component(s) from the Cameletti code
-
-if (run_cameletti){
-  
-  
-  field.indices =
-    inla.spde.make.index("field",
-                         n.spde=spde$n.spde)#,
-#                         n.group=n_days)
-  stack.est =
-    inla.stack(data=list(logPM10=Piemonte_data$logPM10),
-               A=list(A.est, 1),
-               effects=
-                 list(c(field.indices,
-                        list(Intercept=1)),
-                      list(Piemonte_data[,3:10])),
-               tag="est")
-  
-  
-  ## this DID run with our observer data as a very small, simple example
-  
-  field.indices <- inla.spde.make.index("field",
-                                        n.spde=spde$n.spde
-                                        #n.group=n_days
-  )
-  
-  stack_marker <- inla.stack(data=list(pres = data_marker$pres),
-                             A = list(data_marker_A, 1),
-                             effects = list(c(field.indices,
-                                              list(Intercept=1)),
-                                            list(data_marker %>% select(sst))), ## grabs just sst for now
-                             #list(data_observer %>% select(sst:bvfreq))), ## grabs all env covariates
-                             tag="marker")
-  
-  stack_observer <- inla.stack(data=list(pres = data_observer$pres),
-                               A = list(data_observer_A, 1),
-                               effects = list(c(field.indices,
-                                                list(Intercept=1)),
-                                              list(data_observer %>% select(lon, lat, sst))), ## grabs just sst for now
-                               #list(data_observer %>% select(sst:bvfreq))), ## grabs all env covariates
-                               tag="observer")
-  
-  stack_etag <- inla.stack(data=list(pres = data_etag$pres),
-                           A = list(data_etag_A, 1),
-                           effects = list(c(field.indices,
-                                            list(Intercept=1)),
-                                          list(data_etag %>% select(sst))), ## grabs just sst for now
-                           #list(data_observer %>% select(sst:bvfreq))), ## grabs all env covariates
-                           tag="etag")
-  
-  #stack = inla.stack(stack_marker, stack_observer, stack_etag)
-  
-  ## skeptical of the UTMX + UTMY covars, aren't these projected coordinates in UTM? i believe so
-  #formula <- (logPM10 ~ -1 + Intercept + A + UTMX + UTMY + WS + TEMP + HMIX + PREC + EMI + f(field, model=spde, group=field.group, control.group=list(model="ar1")))
-  ## mirroring formula for Cameletti but concerned about how to include spatial component
-  formula <- (pres ~ -1 + Intercept + lon + lat + sst + f(field, model=spde, group=field.group, control.group=list(model="ar1")))
-  
-  
-  t1 <- Sys.time()  
-  result =
-    inla(formula,
-         data=inla.stack.data(stack_observer, spde=spde),
-         family="binomial",
-         control.predictor=list(A=inla.stack.A(stack_observer), compute=TRUE),
-         control.compute=list(cpo=FALSE),
-         control.inla = list(reordering = "metis"),
-         keep=FALSE, verbose=TRUE)
-  t2 <- Sys.time()
-  t2-t1
-  
-}
-
-# INLA STACK & FIT V2 - SUHAIMI --------------------------------------------------------------
-## we need aspects of the correlation modeling from the Suhaimi code
-if (run_suhaimi){
-  # integration stack for unstructured data ###
-  max_x <- max(coarse_mesh$loc[,1])
-  max_y <- max(coarse_mesh$loc[,2])
-  
-  loc.d <- t(matrix(c(0,0,max_x,0,max_x,max_y,0,max_y,0,0), 2))
-  
-  #make dual mesh
-  dd <- deldir::deldir(coarse_mesh$loc[, 1], coarse_mesh$loc[, 2])
-  tiles <- deldir::tile.list(dd)
-  
-  #make domain into spatial polygon
-  domainSP <- SpatialPolygons(list(Polygons(
-    list(Polygon(loc.d)), '0')))
-  
-  #intersection between domain and dual mesh
-  poly.gpc <- as(domainSP@polygons[[1]]@Polygons[[1]]@coords, "gpc.poly")
-  
-  # w now contains area of voronoi polygons
-  w <- sapply(tiles, function(p) rgeos::area.poly(rgeos::intersect(as(cbind(p$x, p$y), "gpc.poly"), poly.gpc)))
-  
-  #check some have 0 weight
-  table(w>0)
-  
-  
-  nv <- coarse_mesh$n
-  n <- nrow(unstructured_data)
-  
-  #change data to include 0s for nodes and 1s for presences
-  y.pp <- rep(0:1, c(nv, n))
-  
-  #add expectation vector (area for integration points/nodes and 0 for presences)
-  e.pp <- c(w, rep(0, n))
-  
-  #diagonal matrix for integration point A matrix
-  imat <- Diagonal(nv, rep(1, nv))
-  
-  A.pp <- rbind(imat, data_marker_A)  # new A matrix for unstructured
-  
-  
-  #### CDB STOPPED HERE IN THIS SECTION
-  
-  #get covariate for integration points
-  #refer plot 'covariate'
-  
-  covariate = dat1$gridcov[Reduce('cbind', 
-                                  nearest.pixel(mesh$loc[,1], 
-                                                mesh$loc[,2], 
-                                                im(dat1$gridcov)))]
-  
-  biascovariate = biascov[Reduce('cbind',
-                                 nearest.pixel(mesh$loc[,1],
-                                               mesh$loc[,2],
-                                               im(biascov)))]
-  
-  biascovariate_rasterim = biascov[Reduce('cbind',
-                                 nearest.pixel(mesh$loc[,1],
-                                               mesh$loc[,2],
-                                               im(biascov_r)))]
-  
-  biascovariate_rastermatim = biascov[Reduce('cbind',
-                                          nearest.pixel(mesh$loc[,1],
-                                                        mesh$loc[,2],
-                                                        im(as.matrix(biascov_r))))]
-  
-  
-  # create data stacks ##
-  
-  #unstructured data stack with integration points
-  stk_unstructured_data <- inla.stack(
-    data = list(y = cbind(y.pp, NA),
-                e = e.pp),
-    effects = list(list(data.frame(interceptB = rep(1, nv+n),
-                                   env = c(covariate, unstructured_data$env),
-                                   bias = c(biascovariate, unstructured_data$bias))),
-                   list(data.frame(uns_field = 1:spde$n.spde),
-                        uns_field.group = rep(1, spde$n.spde))),  # named Group 1
-    A = list(1, A.pp),
-    tag = "unstructured_data"
-  )
-  
-  #structured data stack
-  stk_structured_data <- inla.stack(
-    data = list(y = cbind(NA, structured_data$presence),
-                Ntrials = rep(1, nrow(structured_data))),
-    effects = list(list(data.frame(interceptA = rep(1, length(structured_data$x)),
-                                   env = structured_data$env)),
-                   list(data.frame(uns_field = 1:spde$n.spde),
-                        uns_field.group = rep(2, spde$n.spde))), # named Group 2
-    A = list(1, structured_data_A),
-    tag = "structured_data"
-  )
-  
-  # combine stacks
-  stk <- inla.stack(stk_unstructured_data, stk_structured_data)
-  
-  # prediction stack ###
-  ## CDB: this adds a prediction stack to the input stack to INLA. 
-  ## I dont understand how to do this or why its needed?
-  ## Cameletti has this too...main diff is Suhaimi just wrapped theirs in this custom function
-  source("Create prediction stack for correlation model.R")
-  join.stack <- create_prediction_stack_corr(data_stack = stk,
-                                             resolution = resolution,
-                                             biasfield = biasfield,
-                                             dat1 = dat1,
-                                             mesh = mesh,
-                                             spde = spde)
-  
-  
-  # fit model ###
-  formulaC = y ~ -1 + interceptA + interceptB + env + bias +
-    f(uns_field, model = spde, group = uns_field.group, control.group = list(model = 'exchangeable'))
-  
-  result <- inla(formulaC, 
-                 family = c("poisson", "binomial"),
-                 data = inla.stack.data(join.stack),
-                 control.predictor = list(A = inla.stack.A(join.stack),
-                                          compute = TRUE),
-                 control.family = list(list(link = "log"),
-                                       list(link = "cloglog")),
-                 E = inla.stack.data(join.stack)$e,
-                 Ntrials = inla.stack.data(join.stack)$Ntrials,
-                 control.compute = list(#dic = TRUE, 
-                   #cpo = TRUE,
-                   waic = TRUE))
-  
-  #return(list(join.stack = join.stack, result = result))
-  
-  
-}
-
-# OLD JUNK --------------------------------------------------------------
-run_junk <- FALSE
-if (run_junk){
-  
-  ## marker tag will be as above but adding distance from shore to capture recreational fishery spatial bias? or do we need this?
-  bathy <- raster::raster('~/Google Drive/Shared drives/MPG_WHOI/env_data/bathy/global_bathy_0.01.nc')
-  bathy <- raster::rotate(bathy)
-  bathy <- raster::crop(bathy, raster::extent(xl[1], xl[2], yl[1], yl[2]))
-  
-  gears <- data.table::fread('../NASA-FaCeT/scratch/cdb/CODES_gears.csv')
-  data_marker <- merge(data_marker, gears %>% dplyr::select(GearCode, Code, Name), by='GearCode')
-  #data.frame(data_marker %>% group_by(ObsType, GearName) %>% summarise(n=n()))
-  
-  u_types <- expand.grid(unique(data_marker$ObsType), unique(data_marker$Name))
-  names(u_types) <- c('ObsType','Name')
-  p_list <- list()
-  r1 <- raster(raster::extent(xl[1], xl[2], yl[1], yl[2]), resolution=c(1))
-  
-  for (i in 1:nrow(u_types)){
-    data_marker.i <- data_marker %>% filter(ObsType == u_types$ObsType[i] & Name == u_types$Name[i]) %>% as.data.frame()
-    if (nrow(data_marker.i) == 0) next
-    x <- raster::rasterize(cbind(data_marker.i$lon, data_marker.i$lat), r1, field=data_marker.i$pres, fun=function(x,...) sum(x, na.rm=T) )
-    spdf <- as(x, "SpatialPixelsDataFrame")
-    meso200 <- as.data.frame(spdf)
-    colnames(meso200) <- c("value", "x", "y")
-    
-    p <- ggplot() + geom_polygon(data = world, aes(x=long, y = lat, group = group), fill='grey60') +
-      coord_fixed(xlim=xl, ylim=yl, ratio=1.3) + xlab('') + ylab('') 
-    p <- p + geom_raster(data=meso200, aes(x = x, y = y, fill=value))#, breaks = list(x = sx, y = sy)) 
-    #p <- p + scale_x_continuous(breaks= x.at, labels=x.labels)
-    #p <- p + scale_y_continuous(breaks= y.at, labels=y.labels)
-    #p <- p + scale_fill_gradientn("presence count")#, colours = jet.colors(10), 
-    #                              limits=c(0,50), oob=squish,
-    #                              breaks = seq(0, 50, by=10),
-    #                              labels = c(seq(0, 40, by=10), '>50'),
-    #                              guide = guide_colorbar(barwidth = .5, barheight = 15)) 
-    p <- p + theme_bw(base_size = 14) + theme(panel.grid=element_blank()) + ggtitle(paste0(u_types$ObsType[i], ' - ', u_types$Name[i], '(n=', nrow(data_marker.i),')'))#ggtitle('All species - standard deviation')#+ guides(fill=FALSE) #+ ggtitle(sp[i]) + 
-    #p <- p + facet_wrap_paginate(. ~ platform, ncol=4, nrow=3) #+ theme_bw(base_size = 10) + theme(panel.grid=element_blank())
-    p_list[[i]] <- p
-    
-  }
-  lay <- rbind(c(1,2,3,4),
-               c(5,6,7,8),
-               c(9,10,11,12),
-               c(13,14,15,16))
-  g <- gridExtra::arrangeGrob(grobs = p_list, heights = c(4,4,4,4),
-                              width = c(6,6,6,6), layout_matrix = lay)
-  ggsave(file = paste('./compare_marker_gearcodes.png', sep=''), width=26, height=18, units = 'in', g)
-  
-  ## convert "sport" to RR
-  data_marker$GearCode[which(data_marker$Name == 'sport')] <- 'RR'
-  data_marker$Name[which(data_marker$Name == 'sport')] <- 'rood & reel'
-  
-  
-  
-  ggplot(data_marker, aes(x=lon, y=lat)) +
-    rasterise(geom_point()) +
-    facet_wrap(ObsType ~ Name)
-  
-  g_tmax_map <- ggplot(data = tmax_Jan_09_df) +
-    geom_raster(aes(x = x, y = y, fill = `2009-01-01`)) +
-    scale_fill_viridis_c() +
-    theme_void() +
-    theme(
-      legend.position = "bottom"
-    )
-  
-  
-  sum_n <- data_marker %>% filter(ObsType == 'release') %>% group_by(ObsType, Code) %>% summarise(n=n())
-  sum_n$perc <- round(sum_n$n / sum(sum_n$n), 2)
-  sum_n
-  
-  data_marker_rr <- data_marker %>% filter()
-  
-  ## distance to bathy contour for marker data
-  bcontour <- rasterToContour(bathy, levels=round(median(data_marker$bathy, na.rm=T), 0))
-  paste0('marker - median bathy=', abs(round(median(data_marker$bathy, na.rm=T),0)), 'm')
-  proj4string(bcontour) <- proj4string(bathy)
-  r1 <- raster(raster::extent(xl[1], xl[2], yl[1], yl[2]), resolution=c(.05))
-  dd <- gDistance(bcontour, as(r1,"SpatialPoints"), byid=T)
-  r1[] = apply(dd, 1, min)
-  r1_scaled <- (r1 / cellStats(r1, max))*-1 + 1
-  r1_scaled <- raster::resample(r1_scaled, bathy)
-  r1_scaled <- raster::mask(r1_scaled, bathy)
-  r1_binary <- raster::reclassify(r1_scaled, c(c(0, 0.9, 0), c(0.9, 1, 1)))
-  r1_scaled_0.9 <- raster::reclassify(r1_scaled, c(0, 0.9, NA))
-  r.min = cellStats(r1_scaled_0.9, "min")
-  r.max = cellStats(r1_scaled_0.9, "max")
-  r1_scaled_0.9 <- ((r1_scaled_0.9 - r.min) / (r.max - r.min))
-  r1_scaled_0.9_marker <- raster::mask(raster::reclassify(r1_scaled_0.9, c(NA, NA, 0)), r1_binary)
-  #plot(r1_scaled_0.9_marker)
-  
-  ## distance to bathy contour for observer data
-  bcontour <- rasterToContour(bathy, levels=round(median(data_observer$bathy, na.rm=T), 0))
-  paste0('observer - median bathy=', abs(round(median(data_observer$bathy, na.rm=T),0)), 'm')
-  proj4string(bcontour) <- proj4string(bathy)
-  r1 <- raster(raster::extent(xl[1], xl[2], yl[1], yl[2]), resolution=c(.05))
-  dd <- gDistance(bcontour, as(r1,"SpatialPoints"), byid=T)
-  r1[] = apply(dd, 1, min)
-  r1_scaled <- (r1 / cellStats(r1, max))*-1 + 1
-  r1_scaled <- raster::resample(r1_scaled, bathy)
-  r1_scaled <- raster::mask(r1_scaled, bathy)
-  r1_binary <- raster::reclassify(r1_scaled, c(c(0, 0.9, 0), c(0.9, 1, 1)))
-  r1_scaled_0.9 <- raster::reclassify(r1_scaled, c(0, 0.9, NA))
-  r.min = cellStats(r1_scaled_0.9, "min")
-  r.max = cellStats(r1_scaled_0.9, "max")
-  r1_scaled_0.9 <- ((r1_scaled_0.9 - r.min) / (r.max - r.min))
-  r1_scaled_0.9_observer <- raster::mask(raster::reclassify(r1_scaled_0.9, c(NA, NA, 0)), r1_binary)
-  #plot(r1_scaled_0.9_observer)
-  
-  ## convex hull polygons
-  ## trick the hull so doesnt cut off gulf of maine
-  data_observer_mod <- rbind(data_observer %>% select(lon, lat), rbind(c(-70, 45),
-                                                                       c(-74.68333, 11.71667)), use.names=F) 
-  hull_observer <- terra::convHull(terra::vect(data_observer_mod))
-  hull_observer <- as(hull_observer, "Spatial")
-  ## trick the hull so doesnt cut off gulf of mexico
-  data_marker_mod <- rbind(data_marker %>% select(lon, lat), rbind(#c(-100, 25),
-    c(-96.36667, 26.13333)), use.names=F) ## trick the hull so doesnt cut off gulf of maine
-  hull_marker <- terra::convHull(terra::vect(data_marker_mod %>% select(lon, lat)))
-  hull_marker <- as(hull_marker, "Spatial")
-  
-  ## mask by resulting hull
-  r1_scaled_0.9_observer_mask <- raster::mask(r1_scaled_0.9_observer, hull_observer)
-  r1_scaled_0.9_marker_mask <- raster::mask(r1_scaled_0.9_marker, hull_marker)
-  
-  ## combine a rod reel bathy-based field with a longline bathy-based field and weight them according to %s in iccat dataset
-  marker_bias <- sum(r1_scaled_0.9_observer_mask * .3, ## roughly 30% of marker tag data comes from longline effort
-                     r1_scaled_0.9_marker_mask * .7, na.rm=T) ## roughly 70% of marker tag data comes from rod and reel effort
-  marker_bias <- raster::mask(marker_bias, bathy)
-  
-  ## take a peek
-  pdf('bathy_bias_field.pdf', height=12, width=8)
-  par(mfcol=c(3,1))
-  plot(r1_scaled_0.9_marker, main=paste0('marker - median bathy=', abs(round(median(data_marker$bathy, na.rm=T),0)), 'm'))
-  plot(hull_marker, add=T)
-  points(data_marker$lon, data_marker$lat)
-  plot(r1_scaled_0.9_observer, main=paste0('observer - median bathy=', abs(round(median(data_observer$bathy, na.rm=T),0)), 'm'))
-  plot(hull_observer, add=T)
-  points(data_observer$lon, data_observer$lat)
-  
-  plot(marker_bias, main='bathy bias field = 70% marker & 30% observer')
-  dev.off()
-  
-  
-  ## example env covariate grid that those variables are extracted from and that we will ultimately predict to
-  ## uses native GLORYS grid and resolution
-  #mld <- raster::rotate(raster::stack('/Volumes/Elements/roms_nwa/mld.GLORYS.NWAtl.mon.mean.1993-2018.nc'))
-  #mld <- mld[[1]]
-  #env_coords <- xyFromCell(mld, 1:ncell(mld))
-  
-}
-
+save(result, file=paste0('file_', format(t1, '%Y-%m-%dT%H%M%SZ'), '.rda'))
